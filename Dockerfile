@@ -14,6 +14,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Disable telemetry during build
+# Accept the Railway service variable while Next.js collects page configuration.
+ARG DATABASE_PROVIDER
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
