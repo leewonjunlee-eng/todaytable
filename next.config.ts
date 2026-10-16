@@ -4,8 +4,9 @@ const nextConfig: NextConfig = {
   ...(process.env.TODAYTABLE_IN_PROCESS_TYPESCRIPT === '1'
     ? { experimental: { useTypeScriptCli: false } }
     : {}),
+  output: 'standalone',
   turbopack: {
-    root: '/home/ubuntu/projects/todaytable',
+    root: '.',
   },
 }
 
