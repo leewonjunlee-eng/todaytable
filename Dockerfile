@@ -13,11 +13,12 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Disable telemetry during build
 # Accept the Railway service variable while Next.js collects page configuration.
 ARG DATABASE_PROVIDER
+# Disable telemetry during build
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+# Keep the optional static-assets directory available for the runner COPY.
+RUN mkdir -p public && npm run build
 
 # Production image, copy all necessary files
 FROM base AS runner
