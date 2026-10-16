@@ -1,0 +1,2 @@
+import Link from 'next/link';import type {AuthUser} from '@/lib/auth';import {LogoutButton} from '@/components/logout-button';
+export function TopNav({user}:{user:AuthUser}){return <header className="topbar"><Link className="brand" href="/">우연한 식탁<span>todaytable</span></Link><nav><Link href="/profile">내 프로필</Link><Link href="/apply">신청하기</Link>{user.role==='ADMIN'&&<><Link href="/admin/events">회차</Link><Link href="/admin/venues">식당</Link><Link href="/admin/applications">신청 관리</Link></>}<LogoutButton/></nav></header>}

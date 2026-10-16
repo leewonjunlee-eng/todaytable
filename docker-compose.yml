@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: todaytable
+      POSTGRES_USER: todaytable
+      POSTGRES_PASSWORD: todaytable
+    ports: ["5432:5432"]
+    volumes: [todaytable_pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U todaytable -d todaytable"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+volumes:
+  todaytable_pg:

@@ -1,0 +1,2 @@
+import {requireUser} from '@/lib/auth';import {TopNav} from '@/components/top-nav';import {ProfileForm} from '@/components/profile-form';
+export default async function ProfilePage(){const user=await requireUser();return <><TopNav user={user}/><main className="page narrow"><div className="page-heading"><div className="eyebrow">GET TO KNOW YOU</div><h1>내 프로필</h1><p>함께 나눌 이야기를 알려주세요.</p></div><section className="panel"><ProfileForm/></section></main></>}
