@@ -31,7 +31,7 @@ ALTER TABLE resolution_cases ADD COLUMN selected_choice TEXT;
 ALTER TABLE resolution_cases ADD COLUMN result_payload TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE resolution_cases ADD COLUMN transferred_event_id TEXT REFERENCES events(id);
 CREATE TABLE refund_requests (
-  id TEXT PRIMARY KEY, resolution_id TEXT NOT NULL UNIQUE REFERENCES resolution_cases(id), payment_id TEXT NOT NULL REFERENCES payments(id),
+  id TEXT PRIMARY KEY, resolution_id TEXT UNIQUE REFERENCES resolution_cases(id), payment_id TEXT NOT NULL REFERENCES payments(id),
   status TEXT NOT NULL DEFAULT 'REQUESTED' CHECK(status IN ('REQUESTED','PROCESSING','COMPLETED','FAILED')),
   request_key TEXT NOT NULL UNIQUE, amount_cents INTEGER NOT NULL DEFAULT 0, error TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT
 );
