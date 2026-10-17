@@ -30,9 +30,11 @@ before(async () => {
       DATABASE_PROVIDER: process.env.DATABASE_PROVIDER,
       SQLITE_PATH: process.env.SQLITE_PATH,
       SESSION_SECRET: process.env.SESSION_SECRET,
+      APP_URL: process.env.APP_URL,
     };
     process.env.DATABASE_PROVIDER = 'sqlite';
     process.env.SQLITE_PATH = sqlitePath;
+    process.env.APP_URL = 'http://localhost';
     process.env.SESSION_SECRET = `sqlite-integration-${randomUUID()}-secret-key`;
 
     ({ db } = await import('../lib/db'));
@@ -55,6 +57,10 @@ before(async () => {
     await db.query(
       `INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at)
        VALUES($1,'No Pass','01000000000',1990,'PREFER_NOT_TO_SAY','INTJ',1,1,CURRENT_TIMESTAMP)`, [intruderId],
+    );
+    await db.query(
+      `INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at)
+       VALUES($1,'SQLite Test Participant','01012345678',1992,'PREFER_NOT_TO_SAY','ENFJ',1,1,CURRENT_TIMESTAMP)`, [participantId],
     );
     const { tokenHash } = await import('../lib/security');
     participantToken = randomUUID();
@@ -83,6 +89,7 @@ after(async () => {
         restoreEnv('DATABASE_PROVIDER', startupEnv.DATABASE_PROVIDER);
         restoreEnv('SQLITE_PATH', startupEnv.SQLITE_PATH);
         restoreEnv('SESSION_SECRET', startupEnv.SESSION_SECRET);
+        restoreEnv('APP_URL', startupEnv.APP_URL);
       }
       if (tempDir) await rm(tempDir, {recursive: true, force: true});
     }
