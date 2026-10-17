@@ -1,0 +1,22 @@
+-- Additive SQLite backend hardening. Historical migrations remain immutable.
+PRAGMA foreign_keys=OFF;
+CREATE TABLE journey_messages_new (id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES journey_rooms(id) ON DELETE CASCADE, author_user_id TEXT REFERENCES users(id) ON DELETE CASCADE, body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 2000), request_key TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'USER', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(room_id,request_key));
+INSERT INTO journey_messages_new(id,room_id,author_user_id,body,request_key,kind,created_at) SELECT id,room_id,author_user_id,body,request_key,'USER',created_at FROM journey_messages;
+DROP TABLE journey_messages;
+ALTER TABLE journey_messages_new RENAME TO journey_messages;
+CREATE INDEX IF NOT EXISTS journey_messages_room_idx ON journey_messages(room_id,created_at,id);
+PRAGMA foreign_keys=ON;
+ALTER TABLE events ADD COLUMN ends_at TEXT;
+ALTER TABLE events ADD COLUMN schedule_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE dining_tables ADD COLUMN schedule_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users ADD COLUMN restricted_status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (restricted_status IN ('ACTIVE','SUSPENDED','PERMANENT'));
+ALTER TABLE lifecycle_exceptions ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','RESOLVED','RETRYING'));
+ALTER TABLE lifecycle_exceptions ADD COLUMN resolved_at TEXT;
+ALTER TABLE lifecycle_exceptions ADD COLUMN resolved_by TEXT;
+ALTER TABLE matching_rules ADD COLUMN immutable_version TEXT;
+UPDATE matching_rules SET immutable_version=version WHERE immutable_version IS NULL;
+CREATE TABLE IF NOT EXISTS matching_rule_versions (version TEXT PRIMARY KEY, min_score REAL NOT NULL, weights TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, created_by TEXT);
+INSERT OR IGNORE INTO matching_rule_versions(version,min_score,weights) SELECT version,min_score,weights FROM matching_rules;
+CREATE INDEX IF NOT EXISTS journey_messages_cursor_idx ON journey_messages(room_id,created_at,id);
+UPDATE events SET ends_at=datetime(starts_at,'+2 hours') WHERE ends_at IS NULL;
+UPDATE journey_messages SET kind='SYSTEM', author_user_id=NULL WHERE request_key LIKE '%:system:%';

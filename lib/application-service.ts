@@ -22,7 +22,8 @@ export async function submitApplication(userId: string, body: Submission) {
   try {
     await client.query('BEGIN');
     if (databaseProvider === 'postgres') {
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [userId]);
+      // Same stable lock as matching and resolution; serialize lifecycle decisions.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('todaytable:lifecycle',0))");
     }
 
     const profile = await client.query(
@@ -67,11 +68,11 @@ export async function submitApplication(userId: string, body: Submission) {
     }
 
     const events = await client.query(
-      `SELECT id FROM events
+      `SELECT id,application_deadline FROM events
        WHERE id=ANY($1::uuid[]) AND status='OPEN' AND application_deadline>now()
        FOR SHARE`,
       databaseProvider === 'postgres' ? [selected.eventIds] : selected.eventIds,
-      `SELECT id FROM events WHERE id IN (${selected.eventIds.map((_, i) => `$${i + 1}`).join(',')})
+      `SELECT id,application_deadline FROM events WHERE id IN (${selected.eventIds.map((_, i) => `$${i + 1}`).join(',')})
        AND status='OPEN' AND application_deadline>CURRENT_TIMESTAMP`,
     );
     if (events.rowCount !== selected.eventIds.length) {
@@ -80,15 +81,17 @@ export async function submitApplication(userId: string, body: Submission) {
 
     const duplicate = await client.query(
       `SELECT 1 FROM application_options o
+       JOIN events existing_event ON existing_event.id=o.event_id
        JOIN applications a ON a.id=o.application_id
        JOIN payments p ON p.application_id=a.id
        WHERE a.user_id=$1 AND a.status='SUBMITTED' AND p.status='PAID'
-         AND o.event_id=ANY($2::uuid[]) LIMIT 1`,
+         AND EXISTS (SELECT 1 FROM events selected_event WHERE selected_event.id=ANY($2::uuid[]) AND selected_event.starts_at=existing_event.starts_at) LIMIT 1`,
       databaseProvider === 'postgres' ? [userId, selected.eventIds] : [userId, ...selected.eventIds],
       `SELECT 1 FROM application_options o
+       JOIN events existing_event ON existing_event.id=o.event_id
        JOIN applications a ON a.id=o.application_id JOIN payments p ON p.application_id=a.id
        WHERE a.user_id=$1 AND a.status='SUBMITTED' AND p.status='PAID'
-         AND o.event_id IN (${selected.eventIds.map((_, i) => `$${i + 2}`).join(',')}) LIMIT 1`,
+         AND EXISTS (SELECT 1 FROM events selected_event WHERE selected_event.id IN (${selected.eventIds.map((_, i) => `$${i + 2}`).join(',')}) AND selected_event.starts_at=existing_event.starts_at) LIMIT 1`,
     );
     if (duplicate.rowCount) throw new Error('이미 신청한 저녁이 포함되어 있습니다.');
 
@@ -153,6 +156,13 @@ export async function submitApplication(userId: string, body: Submission) {
        VALUES($1,'APPLICATION_RECEIVED',$2::jsonb,now()) ON CONFLICT(job_key) DO NOTHING`,
       [`application-received:${applicationId}`, JSON.stringify({ applicationId })],
     );
+    for (const event of events.rows as Array<{ id: string; application_deadline: string }>) {
+      await client.query(
+        `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at)
+         VALUES($1,'MATCH_EVENT',$2::jsonb,$3) ON CONFLICT(job_key) DO NOTHING`,
+        [`match-event:${event.id}`, JSON.stringify({ eventId: event.id }), event.application_deadline],
+      );
+    }
     await client.query(
       `INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,after_data)
        VALUES($1,'APPLICATION_SUBMITTED','application',$2,$3::jsonb)`,

@@ -32,10 +32,21 @@ tmp/
 .env
 .env.dev
 .env.prod
+.env*
+!.env.example
 
 # Miscellaneous
 coverage/
 .nyc_output
+tests/
+data/
+.data/
+db/imports/
+*.sqlite
+*.sqlite-*
+*.dump
+*.backup
+*.log
 
 # IDE
 .vscode/

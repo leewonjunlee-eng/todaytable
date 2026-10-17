@@ -31,7 +31,7 @@ function selectedProvider(): DatabaseProvider {
 
 export const databaseProvider = selectedProvider();
 
-const sqlitePath = resolve(process.env.SQLITE_PATH ?? './data/todaytable.sqlite');
+const sqlitePath = resolve(/* turbopackIgnore: true */ process.env.SQLITE_PATH ?? './data/todaytable.sqlite');
 const sqliteHandles = new Set<any>();
 let sqliteInitialized = false;
 
@@ -66,7 +66,7 @@ function sqliteValue(value: unknown): unknown {
 }
 
 function parseJsonColumns(row: Record<string, unknown>) {
-  for (const key of ['payload', 'before_data', 'after_data', 'interests', 'traits', 'desired_traits', 'food_budgets', 'events', 'event_titles', 'areas']) {
+  for (const key of ['payload', 'before_data', 'after_data', 'interests', 'traits', 'desired_traits', 'food_budgets', 'events', 'event_titles', 'areas', 'topics', 'weights']) {
     const value = row[key];
     if (typeof value === 'string') {
       try { row[key] = JSON.parse(value); } catch { /* preserve malformed legacy data for inspection */ }

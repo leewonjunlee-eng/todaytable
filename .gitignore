@@ -10,3 +10,7 @@ data/*.sqlite-shm
 data/*.sqlite-wal
 .data/
 .data/render-smoke/
+
+tests/scratchacceptance-newresults.json
+
+__pycache__/

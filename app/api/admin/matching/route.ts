@@ -1,21 +1,17 @@
-// @ts-nocheck
-import { requireAdmin } from '@/lib/auth';
+import { apiUser } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { sameOrigin } from '@/lib/http';
+import { runMatching } from '@/lib/lifecycle-service';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const rows = await db.query(`
-      SELECT ta.id, ta.event_id, ta.table_name, ta.assigned_user_ids,
-             e.title as event_title
-      FROM table_assignments ta
-      JOIN events e ON ta.event_id = e.id
-      ORDER BY ta.created_at DESC
-      LIMIT 50
-    `);
-    return NextResponse.json({ assignments: rows || [] });
+    const user = await apiUser(request, true);
+    if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
+    const rows = await db.query(`SELECT t.id,t.event_id,t.match_run_id,t.table_number,t.status,t.quality_score,t.created_at,e.title event_title FROM dining_tables t JOIN events e ON e.id=t.event_id ORDER BY t.created_at DESC LIMIT 50`);
+    return NextResponse.json({ tables: rows.rows });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
@@ -23,38 +19,13 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
+    const user = await apiUser(req, true);
+    if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
+    if (!sameOrigin(req)) return NextResponse.json({ error: '요청 출처를 확인할 수 없습니다.' }, { status: 403 });
     const body = await req.json().catch(() => ({}));
     const eventId = body.event_id || null;
-    // Minimal sequential matching: group by event, assign 6 per table
     if (!eventId) return NextResponse.json({ error: 'event_id required' }, { status: 400 });
-    const sql = `SELECT a.id as app_id, a.user_id FROM applications a WHERE a.status = 'SUBMITTED' AND a.matching_status = 'WAITING'`;
-    // @ts-ignore
-    const apps = (await db.query(sql, [eventId])) as any[];
-    if (!apps || apps.length === 0) return NextResponse.json({ assigned: 0, note: 'no waiting apps' });
-    const appsAsArray = (apps as any) || [];
-    // Simple grouping: first 6 -> Table 1, next 6 -> Table 2, ...
-    const tableSize = 6;
-    const groups = Math.ceil((apps as any[]).length / tableSize);
-    const assigned = [];
-    for (let g = 0; g < groups; g++) {
-      const group = apps.slice(g * tableSize, (g + 1) * tableSize);
-      const tableName = `Table ${g + 1}`;
-      const userIds = group.map((r: any) => r.user_id);
-      await db.query(
-        `INSERT INTO table_assignments (event_id, table_name, assigned_user_ids, created_by)
-         VALUES ($1, $2, $3, $4)`,
-        [eventId, tableName, JSON.stringify(userIds), (await requireAdmin()).id]
-      );
-      // Update apps to MATCHING
-      const ids = group.map((r: any) => r.app_id);
-      await db.query(
-        `UPDATE applications SET matching_status = 'MATCHING', updated_at = now() WHERE id = ANY($1::uuid[])`,
-        [ids]
-      );
-      assigned.push({ tableName, count: group.length, userIds });
-    }
-    return NextResponse.json({ assigned: assigned.length, groups: assigned });
+    return NextResponse.json(await runMatching(eventId, `admin-${user.id}`));
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

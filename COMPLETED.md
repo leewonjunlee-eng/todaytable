@@ -19,18 +19,14 @@
 | B | 예약 / 확정 (venue) | DB + UI + API | `db/migrations/003_reservation.sql`, `/admin/reservation` |
 | D | 참석 / 피드백 | DB + UI | `db/migrations/004_attendance.sql`, `/admin/attendance` |
 | C | 알림 / 공지 | DB + UI + API | `db/migrations/005_notification.sql`, `/admin/notification` |
-| — | E (채팅/단체방) | **제외** — WebSocket/인프라 필요, 요청 시 추가 |
+| — | E (채팅/단체방) | **Journey UI 구현** — `/api/tables/:id/messages` GET/POST 3~5초 polling; backend/브라우저 검증 대기 | `app/tables/[id]/chat` |
 
-## 3. 배포 확인
-- 컨테이너 시작: `Starting Container` / `Next.js 16` / `Ready`
-- 현재 `todaytable` 서비스 배포 상태: 대시보드에서 `SUCCESS` 확인 필요 (이전에 FAILED → 현재 env 설정 후 새 배포 시도됨)
-- `OPERATIONS.md` 추가: 가격/지역/PRD-외 운영 정책
-
-## 4. 미완료 / 다음 단계 (선택)
-- 자동 매칭 알고리즘 (현재 순차 6명 할당만): 연령/성비/MBTI 기반 그룹핑
-- 실제 PG/환불 연동 (외부 리소스 — 제외됨)
-- 메시지 채널 확장 (이메일/푸시 — 외부 리소스 제외)
-- 참석 피드백 1~5점 스코어 UI 연동
+## Journey UI 상태 (backend 통합 전)
+- 구현: 참가자/운영자 페이지, 보호된 Journey API 호출, loading/error/empty/refresh, 해상도 충돌의 optimistic version, 3~5초 채팅 polling, requestKey 재시도, 체크인/피드백/안전 요청, 인앱 알림, 푸시 권한과 미구성 상태 표시.
+- 검증 대기: backend worker/API 통합 후 typecheck/build/실제 브라우저 네트워크 검증. 이 브랜치에서는 backend 동시 작업 중이라 해당 명령을 실행하지 않았다.
+- 푸시: VAPID가 없으면 전송하지 않고 `푸시 알림 서버 설정이 없어 현재는 사용할 수 없어요.`를 표시한다. 허위 전송 완료 상태를 만들지 않는다.
+- 채팅: WebSocket 의존이 아니며 `/api/tables/:id/messages` GET/POST polling을 사용한다.
+- 가격: 현재 코드의 1회 8,000원 / 3회권 15,000원을 보존한다. OPERATIONS 문서의 9,900원/멤버십 문구와 정책 충돌이 있으므로 어느 쪽도 임의로 선택하지 않으며, 결제 정책 변경은 별도 결정 사항이다.
 
 ## 5. 실행 명령 (로컬 확인용)
 ```bash

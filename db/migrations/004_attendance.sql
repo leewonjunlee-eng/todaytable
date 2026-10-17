@@ -1,5 +1,8 @@
 -- Attendance / feedback (Step D) — PostgreSQL production
-CREATE TYPE attendance_status AS ENUM ('SCHEDULED', 'ATTENDED', 'CANCELED_EARLY', 'CANCELED_LATE', 'NO_SHOW');
+DO $$ BEGIN
+  CREATE TYPE attendance_status AS ENUM ('SCHEDULED', 'ATTENDED', 'CANCELED_EARLY', 'CANCELED_LATE', 'NO_SHOW');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 CREATE TABLE attendance_records (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   application_id uuid NOT NULL REFERENCES applications(id) ON DELETE CASCADE,

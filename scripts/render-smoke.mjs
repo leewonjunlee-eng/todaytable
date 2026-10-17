@@ -79,15 +79,25 @@ try {
   const guestEmail = process.env.SEED_PARTICIPANT_EMAIL ?? 'guest@todaytable.local';
   const guestPassword = process.env.SEED_PARTICIPANT_PASSWORD ?? 'GuestDemo!2026';
   const guestCookie = await login(handler, guestEmail, guestPassword);
-  for (const pathname of ['/profile', '/apply', '/applications']) {
+  for (const pathname of ['/profile', '/apply', '/applications', '/history', '/notifications']) {
     assertPage(await request(handler, pathname, { cookie: guestCookie }), pathname);
   }
 
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@todaytable.local';
   const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'AdminDemo!2026';
   const adminCookie = await login(handler, adminEmail, adminPassword);
-  for (const pathname of ['/admin/events', '/admin/venues', '/admin/applications']) {
+  for (const pathname of ['/admin', '/admin/events', '/admin/venues', '/admin/applications', '/admin/matching', '/admin/reservation', '/admin/attendance', '/admin/notification', '/admin/exceptions', '/admin/safety', '/admin/operations']) {
     assertPage(await request(handler, pathname, { cookie: adminCookie }), pathname);
+  }
+
+  for (const [pathname, cookie] of [
+    ['/api/journey', guestCookie],
+    ['/api/admin/journey', adminCookie],
+    ['/api/admin/matching-rules', adminCookie],
+  ]) {
+    const response = await request(handler, pathname, { cookie });
+    assert.equal(response.status, 200, `${pathname} should return 200: ${response.text}`);
+    assert.ok(JSON.parse(response.text));
   }
 
   const outputDir = path.join(projectRoot, '.data', 'render-smoke');
@@ -96,7 +106,7 @@ try {
     const filename = `${pathname === '/' ? 'home' : pathname.slice(1).replaceAll('/', '-')}.html`;
     await writeFile(path.join(outputDir, filename), rendered.get(pathname));
   }
-  console.log('Render smoke passed: landing, login, participant pages, and admin pages.');
+  console.log('Render smoke passed: landing, login, participant/admin journey pages and protected APIs.');
   console.log(`Representative HTML saved under ${path.relative(projectRoot, outputDir)}/`);
 } catch (error) {
   failure = error;

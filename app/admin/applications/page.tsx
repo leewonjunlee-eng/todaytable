@@ -53,7 +53,7 @@ export default async function ApplicationsPage() {
           <div><small>예약 작업</small><strong>{jobCount}</strong></div>
         </div>
         <section className="panel">
-          <div className="section-title"><h2>신청 목록</h2><span className="status-pill">매칭 기능 미구현</span></div>
+          <div className="section-title"><h2>신청 목록</h2><span className="status-pill">journey 상태 연동</span></div>
           {applications.rows.length === 0 ? <div className="empty-card">아직 신청이 없어요.</div> : (
             <div className="table-wrap">
               <table>

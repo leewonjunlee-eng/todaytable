@@ -3,21 +3,19 @@ import { redirect } from 'next/navigation';
 import { db } from './db';
 import { tokenHash } from './security';
 
-export type AuthUser = { id: string; email: string; role: 'PARTICIPANT' | 'ADMIN' };
+export type AuthUser = { id: string; email: string; role: 'PARTICIPANT' | 'ADMIN'; restricted_status?: 'ACTIVE' | 'SUSPENDED' | 'PERMANENT' };
 
 async function findUser(token: string): Promise<AuthUser | null> {
   try {
     const { rows } = await db.query<AuthUser>(
-      `SELECT u.id,u.email,u.role FROM sessions s JOIN users u ON u.id=s.user_id
+      `SELECT u.id,u.email,u.role,u.restricted_status FROM sessions s JOIN users u ON u.id=s.user_id
        WHERE s.token_hash=$1 AND s.expires_at>now()`,
       [tokenHash(decodeURIComponent(token))],
-      `SELECT u.id,u.email,u.role FROM sessions s JOIN users u ON u.id=s.user_id
+      `SELECT u.id,u.email,u.role,u.restricted_status FROM sessions s JOIN users u ON u.id=s.user_id
        WHERE s.token_hash=$1 AND s.expires_at>CURRENT_TIMESTAMP`,
     );
-    return rows[0] ?? null;
-  } catch {
-    return null;
-  }
+    return rows[0] && rows[0].restricted_status !== 'PERMANENT' && rows[0].restricted_status !== 'SUSPENDED' ? rows[0] : null;
+  } catch { return null; }
 }
 
 export async function currentUser(): Promise<AuthUser | null> {

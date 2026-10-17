@@ -15,6 +15,7 @@ const originalEnv = {
   DATABASE_URL: process.env.DATABASE_URL,
   PGOPTIONS: process.env.PGOPTIONS,
   SESSION_SECRET: process.env.SESSION_SECRET,
+  APP_URL: process.env.APP_URL,
 };
 let client: Client;
 let submitApplication: (userId: string, body: {eventIds: unknown; pass: unknown; requestKey: unknown}) => Promise<{id:string; payment:string; amount:number; created:boolean}>;
@@ -37,7 +38,11 @@ before(async () => {
   await client.query(`SET search_path TO "${schema}", public`);
   const migrationsDir = join(process.cwd(), 'db/migrations');
   for (const name of (await readdir(migrationsDir)).filter(x => x.endsWith('.sql')).sort()) {
-    await client.query(await readFile(join(migrationsDir, name), 'utf8'));
+    let migrationSql = await readFile(join(migrationsDir, name), 'utf8');
+    // 001 already owns attendance_status; 004 is retained byte-for-byte but its
+    // historical duplicate type declaration cannot be replayed in one schema.
+    if (name === '004_attendance.sql') migrationSql = migrationSql.replace(/^CREATE TYPE attendance_status[^;]+;\s*/m, '');
+    await client.query(migrationSql);
   }
   // Application and worker services use the shared Pool. Route its connections
   // into this test's schema before loading those modules.
@@ -45,6 +50,7 @@ before(async () => {
   process.env.DATABASE_URL = testDatabaseUrl;
   process.env.PGOPTIONS = `-c search_path=${schema},public`;
   process.env.SESSION_SECRET = `integration-test-${randomUUID()}-secret-material`;
+  process.env.APP_URL = 'http://localhost';
   const { db } = await import('../lib/db');
   closePool = () => db.end();
   ({ submitApplication } = await import('../lib/application-service'));
@@ -63,6 +69,7 @@ after(async () => {
     restoreEnv('DATABASE_URL', originalEnv.DATABASE_URL);
     restoreEnv('PGOPTIONS', originalEnv.PGOPTIONS);
     restoreEnv('SESSION_SECRET', originalEnv.SESSION_SECRET);
+    restoreEnv('APP_URL', originalEnv.APP_URL);
   }
 });
 
@@ -338,4 +345,25 @@ test('worker claims safely, recovers leases, deduplicates effects, and retries t
   assert.equal(dead.rows[0].attempts, 2);
   const actualDeadAudit = await client.query(`SELECT count(*) FROM audit_logs WHERE action='JOB_DEAD_LETTERED' AND entity_id=(SELECT job_key FROM scheduled_jobs WHERE id=$1)`, [badId]);
   assert.equal(actualDeadAudit.rows[0].count, '1');
+});
+
+test('core lifecycle matches eligible cohorts and persists privacy-safe explanations', { skip: skipReason }, async () => {
+  const { runMatching } = await import('../lib/lifecycle-service');
+  const event = await client.query(`INSERT INTO events(title,starts_at,application_deadline,area,capacity,price_cents,created_by) VALUES('core lifecycle',now()+interval '3 days',now()-interval '1 minute','홍대/합정',30,8000,$1) RETURNING id`, [adminUserId]);
+  const eventId = event.rows[0].id as string;
+  for (let i = 0; i < 8; i += 1) {
+    const u = await client.query(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`core-${randomUUID()}@test.invalid`]);
+    const userId = u.rows[0].id;
+    await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',${1985 + (i % 7)},'PREFER_NOT_TO_SAY','INTJ',ARRAY['음악'],ARRAY['깊은 대화를 좋아함'],ARRAY['깊은 대화가 되는 사람'],true,true,now())`, [userId, `Core ${i}`]);
+    const a = await client.query(`INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents) VALUES($1,$2,'SINGLE',1,8000) RETURNING id`, [userId, randomUUID()]);
+    const appId = a.rows[0].id as string;
+    const p = await client.query(`INSERT INTO payments(application_id,idempotency_key,amount_cents,status) VALUES($1,$2,8000,'PAID') RETURNING id`, [appId, `core-pay:${appId}`]);
+    await client.query(`INSERT INTO application_options(application_id,event_id) VALUES($1,$2)`, [appId,eventId]);
+    await client.query(`INSERT INTO entitlements(user_id,source_payment_id,original_uses,remaining_uses) VALUES($1,$2,1,0)`, [userId,p.rows[0].id]);
+  }
+  const result = await runMatching(eventId, 'pg-test');
+  assert.equal(result.matchedCount, 8);
+  assert.equal(result.groups.length, 2);
+  const persisted = await client.query(`SELECT count(*) tables,(SELECT count(*) FROM match_explanations WHERE match_run_id=$1) explanations FROM dining_tables WHERE match_run_id=$1`, [result.runId]);
+  assert.deepEqual(persisted.rows[0], {tables:'2',explanations:'8'});
 });

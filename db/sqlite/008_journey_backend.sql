@@ -1,0 +1,20 @@
+-- Journey backend: SQLite.
+CREATE TABLE journey_rooms (id TEXT PRIMARY KEY, table_id TEXT NOT NULL UNIQUE REFERENCES dining_tables(id) ON DELETE CASCADE, welcome_message TEXT NOT NULL, rules_message TEXT NOT NULL, curation_message TEXT NOT NULL, topics TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE journey_messages (id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES journey_rooms(id) ON DELETE CASCADE, author_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 2000), request_key TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(room_id,request_key));
+CREATE INDEX journey_messages_room_idx ON journey_messages(room_id,created_at,id);
+CREATE TABLE journey_feedback (id TEXT PRIMARY KEY, table_id TEXT NOT NULL REFERENCES dining_tables(id) ON DELETE CASCADE, author_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, table_score INTEGER NOT NULL CHECK(table_score BETWEEN 1 AND 5), conversation_score INTEGER NOT NULL CHECK(conversation_score BETWEEN 1 AND 5), venue_score INTEGER NOT NULL CHECK(venue_score BETWEEN 1 AND 5), return_intent INTEGER NOT NULL, recommend_intent INTEGER NOT NULL, comment TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(table_id,author_user_id));
+CREATE TABLE safety_reports (id TEXT PRIMARY KEY, table_id TEXT NOT NULL REFERENCES dining_tables(id) ON DELETE CASCADE, reporter_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, target_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 1000), decision TEXT NOT NULL DEFAULT 'OPEN', note TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed_at TEXT, reviewed_by TEXT REFERENCES users(id), UNIQUE(table_id,reporter_user_id,target_user_id));
+CREATE TABLE feedback_relationships (id TEXT PRIMARY KEY, table_id TEXT NOT NULL REFERENCES dining_tables(id) ON DELETE CASCADE, source_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, target_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, relationship_type TEXT NOT NULL CHECK(relationship_type IN ('LIKE','DISLIKE')), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(table_id,source_user_id,target_user_id));
+CREATE TABLE table_reservations (id TEXT PRIMARY KEY, table_id TEXT NOT NULL UNIQUE REFERENCES dining_tables(id) ON DELETE CASCADE, venue_id TEXT NOT NULL REFERENCES venues(id), reservation_name TEXT NOT NULL, meeting_time TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'CONFIRMED', provider TEXT NOT NULL DEFAULT 'MOCK', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL UNIQUE, subscription TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE matching_rules (id INTEGER PRIMARY KEY DEFAULT 1, version TEXT NOT NULL, min_score REAL NOT NULL DEFAULT 0, weights TEXT NOT NULL DEFAULT '{"gender":0.4,"mbti":0.25,"interests":0.2,"traits":0.1,"novelty":0.05}', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO matching_rules(id,version) VALUES(1,'core-v1') ON CONFLICT(id) DO NOTHING;
+ALTER TABLE events ADD COLUMN venue_id TEXT REFERENCES venues(id);
+ALTER TABLE dining_tables ADD COLUMN venue_id TEXT REFERENCES venues(id);
+ALTER TABLE dining_tables ADD COLUMN starts_at TEXT;
+ALTER TABLE dining_tables ADD COLUMN area TEXT;
+ALTER TABLE dining_tables ADD COLUMN capacity INTEGER;
+ALTER TABLE dining_tables ADD COLUMN locked_at TEXT;
+ALTER TABLE attendance_records ADD COLUMN checked_in_at TEXT;
+ALTER TABLE attendance_records ADD COLUMN feedback_requested_at TEXT;
+ALTER TABLE attendance_records ADD COLUMN followup_sent_at TEXT;
