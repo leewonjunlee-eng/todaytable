@@ -18,3 +18,8 @@
 - `refund_requests.resolution_id` nullable 확인 (`\d` + INSERT 시도).
 - Node `DATABASE_URL` + `DATABASE_PROVIDER=postgres` 연결 성공 (`{ ok: 1 }`).
 - PG acceptance (provider-acceptance) 미실행 — 테스트 환경 변수/DB 상태 확인 후 순차 실행 필요.
+
+## 2026-10-17 PG provider-acceptance (완료)
+- 테스트: TEST_DATABASE_URL=postgresql://tt_test:tttest@127.0.0.1:5432/todaytable_test, DATABASE_PROVIDER=postgres
+- 결과: migration 001-013 첫/두 번째 0 종료, 시나리오 16~20 전부 passed (취소/운영자 메시지/여정 커서/마이그레이션 재실행/푸시 재시도)
+- guardrail (provider-acceptance.ts) 원본 복원 완료 (git checkout)
