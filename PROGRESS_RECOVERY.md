@@ -12,3 +12,9 @@
 
 ## 다음
 - PG auth 해결 → 006-013 마이그레이션 적용 → SQLite 시나리오 19/19 재확인 (현재 14/23 일부 실패) → 브라우저 시나리오 실행 → 커밋/푸시 → 운영 DB 백업 → web 배포 → worker 서비스 생성.
+
+## 2026-10-17 추가 진행 (PG)
+- PostgreSQL 서버 (/var/lib/postgresql/14/main) 사용, DB `todaytable` 생성, 001-013 마이그레이션 전체 적용 완료 (38 테이블).
+- `refund_requests.resolution_id` nullable 확인 (`\d` + INSERT 시도).
+- Node `DATABASE_URL` + `DATABASE_PROVIDER=postgres` 연결 성공 (`{ ok: 1 }`).
+- PG acceptance (provider-acceptance) 미실행 — 테스트 환경 변수/DB 상태 확인 후 순차 실행 필요.
