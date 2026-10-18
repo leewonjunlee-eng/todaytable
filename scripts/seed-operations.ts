@@ -10,9 +10,13 @@ const id = (key: string) => {
   const h = createHash('sha256').update(`${batch}:${key}`).digest('hex');
   return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;
 };
-const at = (offset: number) => {
-  const day = new Date(Date.now() + offset * 86400000);
-  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 10, 30));
+const at = (thursdayIndex: number) => {
+  const todayKst = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [year, month, day] = todayKst.split('-').map(Number);
+  const today = new Date(Date.UTC(year, month - 1, day));
+  const thursdayOffset = (4 - today.getUTCDay() + 7) % 7 || 7;
+  const eventDate = new Date(today.getTime() + (thursdayOffset + thursdayIndex * 7) * 86400000);
+  return new Date(Date.UTC(eventDate.getUTCFullYear(), eventDate.getUTCMonth(), eventDate.getUTCDate(), 10, 30));
 };
 const json = JSON.stringify;
 const names = ['김서연','이도윤','박지우','최하준','정수빈','강민재','윤하은','장유진','임지호','한소윤','오시우','신예린'];
@@ -50,14 +54,14 @@ export async function seedOperations() {
     for (let n=0; n<4; n++) await client.query('INSERT INTO venues(id,name,area,address,capacity) VALUES($1,$2,$3,$4,60)',
           [id(`venue:${n}`),venueNames[n],REGIONS[n],['서울 마포구 합정동','서울 송파구 잠실동','서울 강남구 논현동','서울 종로구 관철동'][n]]);
         const cohorts = [
-          {day:-21, count:6, state:'past'}, {day:-14,count:6,state:'past'}, {day:-7,count:6,state:'past'},
-          {day:1,count:6,state:'confirmed'}, {day:3,count:6,state:'confirmed'}, {day:5,count:6,state:'confirmed'},
-          {day:8,count:6,state:'waiting'}, {day:10,count:6,state:'waiting'}, {day:12,count:4,state:'waiting'},
-          {day:15,count:4,state:'waiting'}, {day:6,count:2,state:'unmatched'}, {day:18,count:2,state:'refund'},
+          {thu:0, count:6, state:'past'}, {thu:1,count:6,state:'past'}, {thu:2,count:6,state:'past'},
+          {thu:3,count:6,state:'confirmed'}, {thu:4,count:6,state:'confirmed'}, {thu:5,count:6,state:'confirmed'},
+          {thu:6,count:6,state:'waiting'}, {thu:7,count:6,state:'waiting'}, {thu:8,count:4,state:'waiting'},
+          {thu:9,count:4,state:'waiting'}, {thu:10,count:2,state:'unmatched'}, {thu:11,count:2,state:'refund'},
         ];
         let applicationCount=0, tableCount=0;
         for (let n=0; n<cohorts.length; n++) {
-          const cohort=cohorts[n], eventId=id(`event:${n}`), start=at(cohort.day), end=new Date(start.getTime()+7200000);
+          const cohort=cohorts[n], eventId=id(`event:${n}`), start=at(cohort.thu), end=new Date(start.getTime()+7*86400000);
           const deadline=new Date((cohort.state==='waiting'||cohort.state==='refund')?start.getTime()-172800000:Date.now()-60000);
           await client.query(`INSERT INTO events(id,title,starts_at,ends_at,application_deadline,area,capacity,price_cents,created_by,venue_id,is_demo) VALUES($1,$2,$3,$4,$5,$6,24,8000,$7,$8,TRUE)`,
             [eventId,`${REGIONS[n%4]} ${['취향을 나누는 저녁','여행 이야기 식탁','퇴근 후 새로운 만남'][n%3]}`,start,end,deadline,REGIONS[n%4],adminId,id(`venue:${n%4}`)]);
