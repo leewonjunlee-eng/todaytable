@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       // The browser cookie is still removed if the session store is unavailable.
     }
   }
-  const response = NextResponse.redirect(new URL('/login', request.url), 303);
+  const response = NextResponse.redirect(new URL('/login', process.env.APP_URL ?? request.url), 303);
   response.cookies.set('todaytable_session', '', {
     httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict',
     path: '/', maxAge: 0,

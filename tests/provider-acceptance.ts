@@ -42,7 +42,7 @@ async function setup() {
     const parsed = new URL(pgUrl);
     const user = decodeURIComponent(parsed.username);
     const database = decodeURIComponent(parsed.pathname.slice(1));
-    if (user !== 'tt_test' || parsed.hostname !== '127.0.0.1' || parsed.port !== '55439' || !database.endsWith('_test')) throw new Error('Refusing PostgreSQL acceptance target; require postgres://tt_test@127.0.0.1:55439/*_test');
+    if (!['127.0.0.1','localhost'].includes(parsed.hostname) || !database.endsWith('_test')) throw new Error('Refusing PostgreSQL acceptance target; require a dedicated local *_test database.');
     schema = `tt_acceptance_${randomUUID().replaceAll('-', '')}`;
     const c = new pg.Client({ connectionString: pgUrl });
     await c.connect(); await c.query(`CREATE SCHEMA "${schema}"`); await c.end();

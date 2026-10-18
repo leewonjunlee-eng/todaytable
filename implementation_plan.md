@@ -1,6 +1,6 @@
 # 우연한 식탁 MVP 구현·배포·작업 계획
 
-작성일: 2026-10-15. 갱신일: 2026-10-16. 상태: 기본 틀 소스 구현 및 검토 진행, 실제 DB·브라우저·배포 검증 대기. [요구사항 요약](kickoff_summary.md)과 [검증 결과](verification_report.md)를 바탕으로 작성했다. 현재 실행 방법은 [README](README.md), 이번 범위와 완료 판정은 [기반 구현 계획](foundation_acceptance.md)을 참고한다.
+작성일: 2026-10-15. 갱신일: 2026-10-16. 상태: 기본 틀 소스 구현 및 검토 진행, 실제 DB·브라우저·배포 검증 대기. [요구사항 요약](kickoff_summary.md)과 [검증 결과](docs/archive/verification_report.md)를 바탕으로 작성했다. 현재 실행 방법은 [README](README.md), 이번 범위와 완료 판정은 [기반 구현 계획](docs/archive/foundation_acceptance.md)을 참고한다.
 
 ## 현재 계획 요약
 

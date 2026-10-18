@@ -18,7 +18,8 @@ const runs = [];
 try {
   runs.push({ provider: 'sqlite', ...(await run({ DATABASE_PROVIDER: 'sqlite', SQLITE_PATH: join(dir, 'isolated.sqlite') })) });
   if (process.env.TEST_DATABASE_URL) {
-    if (process.env.TEST_DATABASE_URL !== 'postgres://tt_test@127.0.0.1:55439/todaytable_test') throw new Error('TEST_DATABASE_URL must be exactly postgres://tt_test@127.0.0.1:55439/todaytable_test');
+    const target=new URL(process.env.TEST_DATABASE_URL);
+    if(!['127.0.0.1','localhost'].includes(target.hostname)||!target.pathname.endsWith('_test'))throw new Error('TEST_DATABASE_URL must name a dedicated local *_test database.');
     runs.push({ provider: 'postgres', ...(await run({ DATABASE_PROVIDER: 'postgres', DATABASE_URL: process.env.TEST_DATABASE_URL })) });
   } else console.warn('PG acceptance not run: set TEST_DATABASE_URL=postgres://tt_test@127.0.0.1:55439/todaytable_test');
 } finally {

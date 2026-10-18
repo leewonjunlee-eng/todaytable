@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { apiUser } from '@/lib/auth';
+import {updatePreferenceSignals} from '@/lib/feedback-service';
 import { db } from '@/lib/db';
 import { sameOrigin } from '@/lib/http';
 import { isCanonicalUuid } from '@/lib/domain';
@@ -19,7 +20,31 @@ export async function GET(request: Request) {
   ]);
   const count = await db.query<any>(`SELECT count(*)::int total,count(*) FILTER (WHERE matching_status='CONFIRMED')::int confirmed FROM applications`, [], `SELECT count(*) total,sum(CASE WHEN matching_status='CONFIRMED' THEN 1 ELSE 0 END) confirmed FROM applications`);
   const c = count.rows[0] ?? { total: 0, confirmed: 0 };
-  return NextResponse.json({ metrics: [{ label: 'applications', value: Number(c.total), numerator: Number(c.total), denominator: Number(c.total) }, { label: 'confirmed', value: Number(c.confirmed), numerator: Number(c.confirmed), denominator: Number(c.total) }], tables: tables.rows, exceptions: exceptions.rows, reports: reports.rows, attendance: attendance.rows, notifications: notifications.rows, feedback: feedback.rows, jobs: jobs.rows });
+  const [money, recentPayments, demo] = await Promise.all([
+    db.query<any>(`SELECT
+      COALESCE(SUM(CASE WHEN status='PAID' THEN amount_cents ELSE 0 END),0) paid,
+      COALESCE(SUM(CASE WHEN status='REFUNDED' THEN amount_cents ELSE 0 END),0) refunded,
+      COALESCE(SUM(CASE WHEN status IN ('REFUND_REQUESTED','REFUND_PROCESSING') THEN amount_cents ELSE 0 END),0) refund_pending,
+      COUNT(*) payment_count FROM payments WHERE provider='MOCK'`),
+    db.query(`SELECT p.id,p.amount_cents,p.status,p.provider,p.created_at,pr.display_name,a.pass_choice,
+      (SELECT MIN(e.title) FROM application_options o JOIN events e ON e.id=o.event_id WHERE o.application_id=a.id) title
+      FROM payments p JOIN applications a ON a.id=p.application_id LEFT JOIN profiles pr ON pr.user_id=a.user_id
+      ORDER BY p.created_at DESC LIMIT 20`),
+    db.query("SELECT 1 FROM audit_logs WHERE action='DEMO_OPERATIONS_SEEDED' LIMIT 1"),
+  ]);
+  const finance = { paid: Number(money.rows[0].paid), refunded: Number(money.rows[0].refunded), refundPending: Number(money.rows[0].refund_pending), paymentCount: Number(money.rows[0].payment_count), currency: 'KRW', simulated: true };
+
+  return NextResponse.json({
+    demo: Boolean(demo.rowCount), finance, payments: recentPayments.rows,
+    metrics: [
+      { label: '누적 신청', value: Number(c.total), numerator: Number(c.total), denominator: Number(c.total) },
+      { label: '매칭 확정', value: Number(c.confirmed), numerator: Number(c.confirmed), denominator: Number(c.total) },
+      { label: '모의 결제 매출', value: `₩${finance.paid.toLocaleString('ko-KR')}` },
+      { label: '모의 환불 완료', value: `₩${finance.refunded.toLocaleString('ko-KR')}` },
+      { label: '환불 처리 대기', value: `₩${finance.refundPending.toLocaleString('ko-KR')}` },
+    ], tables: tables.rows, exceptions: exceptions.rows, reports: reports.rows, attendance: attendance.rows,
+    notifications: notifications.rows, feedback: feedback.rows, jobs: jobs.rows,
+  });
 }
 
 export async function POST(request: Request) {
@@ -56,7 +81,7 @@ export async function POST(request: Request) {
       else { const report = await client.query<any>(`SELECT target_user_id FROM safety_reports WHERE id=$1 FOR UPDATE`, [body.id]); if (!report.rowCount) result = { body: { error: '신고를 찾을 수 없습니다.' }, status: 404 }; else { const decision = ({ warning: 'WARNING', suspend: 'SUSPEND', permanent: 'PERMANENT', dismiss: 'DISMISSED' } as Record<string, string>)[body.decision]; await client.query(`UPDATE safety_reports SET decision=$2,note=$3,reviewed_at=now(),reviewed_by=$4 WHERE id=$1`, [body.id, decision, body.note ?? null, user.id]); if (decision === 'SUSPEND' || decision === 'PERMANENT') await client.query(`UPDATE users SET restricted_status=$2 WHERE id=$1`, [report.rows[0].target_user_id, decision === 'SUSPEND' ? 'SUSPENDED' : 'PERMANENT']); } }
     } else if (body.action === 'SET_ATTENDANCE') {
       if (!['ATTENDED', 'NO_SHOW', 'SCHEDULED'].includes(body.status)) result = { body: { error: '참석 상태가 올바르지 않습니다.' }, status: 400 };
-      else { const updated = await client.query(`UPDATE attendance_records SET status=$2,checked_by=$3,checked_at=now(),updated_at=now() WHERE id=$1`, [body.id, body.status, user.id]); if (!updated.rowCount) result = { body: { error: '참석 기록을 찾을 수 없습니다.' }, status: 404 }; }
+      else { const updated = await client.query(`UPDATE attendance_records SET status=$2,checked_by=$3,checked_at=now(),updated_at=now() WHERE id=$1`, [body.id, body.status, user.id]); if (!updated.rowCount) result = { body: { error: '참석 기록을 찾을 수 없습니다.' }, status: 404 }; else await updatePreferenceSignals(client); }
     } else result = { body: { error: '지원하지 않는 작업입니다.' }, status: 400 };
     if (result.status === 200) await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,after_data) VALUES($1,$2,'admin_action',$3,$4)`, [user.id, body.action, body.id, JSON.stringify(body)]);
     await client.query(result.status === 200 ? 'COMMIT' : 'ROLLBACK');

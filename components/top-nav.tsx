@@ -1,2 +1,3 @@
-import Link from 'next/link';import type {AuthUser} from '@/lib/auth';import {LogoutButton} from '@/components/logout-button';
-export function TopNav({user}:{user:AuthUser}){return <header className="topbar"><Link className="brand" href="/">우연한 식탁<span>todaytable</span></Link><nav><Link href="/profile">내 프로필</Link><Link href="/applications">신청 내역</Link><Link href="/history">지난 식탁</Link><Link href="/notifications">알림</Link>{user.role==='ADMIN'&&<><Link href="/admin">운영 대시보드</Link><Link href="/admin/source-data">제공 데이터</Link></>}<LogoutButton/></nav></header>}
+import type {AuthUser} from '@/lib/auth';
+import {SiteNav} from './site-nav';
+export function TopNav({user}:{user:AuthUser}){return <SiteNav admin={user.role==='ADMIN'}/>;}

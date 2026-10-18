@@ -68,11 +68,11 @@ export async function submitApplication(userId: string, body: Submission) {
     }
 
     const events = await client.query(
-      `SELECT id,application_deadline FROM events
+      `SELECT id,application_deadline,is_demo FROM events
        WHERE id=ANY($1::uuid[]) AND status='OPEN' AND application_deadline>now()
        FOR SHARE`,
       databaseProvider === 'postgres' ? [selected.eventIds] : selected.eventIds,
-      `SELECT id,application_deadline FROM events WHERE id IN (${selected.eventIds.map((_, i) => `$${i + 1}`).join(',')})
+      `SELECT id,application_deadline,is_demo FROM events WHERE id IN (${selected.eventIds.map((_, i) => `$${i + 1}`).join(',')})
        AND status='OPEN' AND application_deadline>CURRENT_TIMESTAMP`,
     );
     if (events.rowCount !== selected.eventIds.length) {
@@ -95,10 +95,12 @@ export async function submitApplication(userId: string, body: Submission) {
     );
     if (duplicate.rowCount) throw new Error('이미 신청한 저녁이 포함되어 있습니다.');
 
+    if(new Set(events.rows.map(e=>Boolean(e.is_demo))).size>1)throw new Error('실제 회차와 모의 회차는 따로 신청해 주세요.');
+    const demoUser=(await client.query('SELECT is_demo FROM users WHERE id=$1',[userId])).rows[0]?.is_demo;
     const application = await client.query(
-      `INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents)
-       VALUES($1,$2,$3,$4,$5) RETURNING id`,
-      [userId, body.requestKey, selected.pass, selected.uses, selected.amount],
+      `INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents,is_demo)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [userId, body.requestKey, selected.pass, selected.uses, selected.amount,Boolean(demoUser||events.rows.some(e=>e.is_demo))],
     );
     const applicationId = application.rows[0].id as string;
     for (const eventId of selected.eventIds) {

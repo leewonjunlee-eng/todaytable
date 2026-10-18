@@ -8,6 +8,7 @@
     "start": "next start",
     "worker": "node --env-file-if-exists=.env.local --import tsx worker/index.ts",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
+    "db:seed:operations": "node --env-file-if-exists=.env.local --import tsx scripts/seed-operations.ts",
     "db:seed": "node --env-file-if-exists=.env.local --import tsx scripts/seed.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --env-file-if-exists=.env.local --import tsx --test tests/*.test.ts",
@@ -18,7 +19,7 @@
     "serve:unix": "node --env-file-if-exists=.env.local scripts/serve-unix.mjs"
   },
   "dependencies": {
-    "next": "16.3.0",
+    "next": "16.4.2",
     "pg": "8.16.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -31,6 +32,7 @@
     "@types/react": "19.2.0",
     "@types/react-dom": "19.2.0",
     "@types/web-push": "3.6.4",
+    "playwright": "1.64.1",
     "typescript": "5.9.3"
   }
 }

@@ -1,4 +1,4 @@
 import {requireAdmin} from '@/lib/auth';
-import {AdminMatchingView} from '@/components/admin-journey';
+import {MatchingStudio} from '@/components/matching-studio';
 export const dynamic='force-dynamic';
-export default async function AdminMatchingPage(){await requireAdmin();return <AdminMatchingView/>;}
+export default async function Matching(){await requireAdmin();return <MatchingStudio/>;}

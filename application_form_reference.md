@@ -102,4 +102,4 @@
 | 단체방 | 식사 후 퇴장 가능 | PRD의 단체방 퇴장 불가 문구와 적용 기간 확인 필요 |
 | 안전·서비스 성격 | 친구·관계 형성 목적, 부담 주는 행동 제한 | 소개·온보딩·주의 사항에 반영. 성비를 연애 매칭 보장으로 표현하지 않음. 노쇼 후보 검토와 참가 제한 조치 기록 연결 |
 
-관련 자료: [킥오프 요약](kickoff_summary.md), [검증 결과](verification_report.md), [구현 계획](implementation_plan.md).
+관련 자료: [킥오프 요약](kickoff_summary.md), [검증 결과](docs/archive/verification_report.md), [구현 계획](implementation_plan.md).

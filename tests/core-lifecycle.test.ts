@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -9,7 +9,7 @@ let db: typeof import('../lib/db').db; let runMatching: typeof import('../lib/li
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), 'todaytable-core-')); process.env.DATABASE_PROVIDER='sqlite'; process.env.SQLITE_PATH=join(dir,'core.sqlite');
   ({ db } = await import('../lib/db')); ({ runMatching, repairTable } = await import('../lib/lifecycle-service'));
-  for (const name of ['001_foundation.sql','002_matching.sql','003_reservation.sql','004_attendance.sql','005_notification.sql','006_core_lifecycle.sql','007_lifecycle_hardening.sql','008_journey_backend.sql','009_backend_hardening.sql','010_attendance_candidates.sql','011_provisioning_push.sql']) await db.execScript(await readFile(join(process.cwd(),'db/sqlite',name),'utf8'));
+  for (const name of (await readdir(join(process.cwd(), 'db/sqlite'))).filter(name => name.endsWith('.sql')).sort()) await db.execScript(await readFile(join(process.cwd(),'db/sqlite',name),'utf8'));
 });
 after(async () => { await db.end(); await rm(dir,{recursive:true,force:true}); });
 test('SQLite lifecycle persists deterministic 4+4 groups and rejects a 9-year span', async () => {
@@ -31,6 +31,19 @@ test('SQLite lifecycle persists deterministic 4+4 groups and rejects a 9-year sp
 
 test('repairTable fills a three-person table with a paid, consented eligible applicant', async () => {
   const table=(await db.query<any>("SELECT id FROM dining_tables WHERE event_id=$1 ORDER BY table_number LIMIT 1",[fixtureEvent])).rows[0].id;
+  const { provisionTable } = await import('../lib/lifecycle-service');
+  await db.query("INSERT INTO venues(name,area,address,capacity) VALUES('Repair venue','홍대/합정','test address',100)");
+  const provision = async (eventId: string) => {
+    const rows = (await db.query<any>("SELECT application_id,user_id FROM table_members WHERE table_id=$1 AND status='ACTIVE'", [table])).rows;
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await provisionTable(client, table, eventId, rows.map(r => ({ applicationId:r.application_id,userId:r.user_id,birthYear:1992,gender:'WOMAN',mbti:'INTJ',interests:[],traits:[],desiredTraits:[],eventIds:[eventId],paid:true,valid:true })));
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  };
+  await provision(fixtureEvent);
+  const oldJobs = (await db.query<any>("SELECT id FROM scheduled_jobs WHERE json_extract(payload,'$.tableId')=$1 AND job_type='JOURNEY_FEEDBACK_REQUEST'", [table])).rows;
   const removed=(await db.query<any>("SELECT application_id FROM table_members WHERE table_id=$1 AND status='ACTIVE' ORDER BY user_id LIMIT 1",[table])).rows[0].application_id;
   await db.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND application_id=$2",[table,removed]);
   await db.query("UPDATE applications SET status='CANCELED',matching_status='NO_MATCH' WHERE id=$1",[removed]);
@@ -49,6 +62,14 @@ test('repairTable fills a three-person table with a paid, consented eligible app
   assert.equal((await db.query<any>('SELECT event_id FROM dining_tables WHERE id=$1',[table])).rows[0].event_id,alternate);
   assert.equal(Number((await db.query<any>("SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'",[table])).rows[0].count),4);
   assert.equal((await db.query<any>("SELECT matching_status FROM applications WHERE id=$1",[app])).rows[0].matching_status,'CONFIRMED');
+  assert.equal((await db.query<any>('SELECT status FROM scheduled_jobs WHERE id=$1', [oldJobs[0].id])).rows[0].status, 'DONE');
+  await provision(alternate);
+  const feedback = (await db.query<any>("SELECT run_at FROM scheduled_jobs WHERE json_extract(payload,'$.tableId')=$1 AND job_type='JOURNEY_FEEDBACK_REQUEST' AND status='PENDING'", [table])).rows;
+  assert.equal(feedback.length, 1);
+  const ends = (await db.query<any>("SELECT datetime(starts_at,'+2 hours') ends_at FROM events WHERE id=$1", [alternate])).rows[0].ends_at;
+  assert.equal(new Date(feedback[0].run_at).getTime(), new Date(ends).getTime());
+  assert.equal((await db.query<any>("SELECT status FROM attendance_records WHERE application_id=$1", [removed])).rows.length, 1);
+
 });
 
 test('repairTable records an admin exception when the compatible cohort stays below four', async () => {
@@ -59,4 +80,14 @@ test('repairTable records an admin exception when the compatible cohort stays be
   const result=await repairTable(table,fixtureEvent);
   assert.equal(result.status,'EXCEPTION');
   assert.equal(Number((await db.query<any>("SELECT count(*) count FROM lifecycle_exceptions WHERE source='repair_table' AND entity_id=$1",[table])).rows[0].count),1);
+});
+
+test('repairTable refuses past events and canceled alternatives even when enough compatible members remain', async () => {
+  const table = (await db.query<any>("SELECT id,event_id FROM dining_tables WHERE event_id<>$1 LIMIT 1", [fixtureEvent])).rows[0];
+  await db.query("UPDATE dining_tables SET status='EXCEPTION' WHERE id=$1", [table.id]);
+  await db.query("UPDATE events SET starts_at=datetime('now','-1 day'),status='CLOSED' WHERE id=$1", [table.event_id]);
+  await db.query("UPDATE events SET status='CANCELLED',capacity=30 WHERE id=$1", [fixtureEvent]);
+  const result = await repairTable(table.id, fixtureEvent);
+  assert.equal(result.status, 'EXCEPTION');
+  assert.equal((await db.query<any>('SELECT event_id FROM dining_tables WHERE id=$1', [table.id])).rows[0].event_id, table.event_id);
 });

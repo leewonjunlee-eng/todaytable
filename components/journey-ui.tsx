@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { LogoutButton } from './logout-button';
+import {SiteNav} from './site-nav';
 
 export type JourneyData = {
   applications?: any[];
@@ -61,6 +61,8 @@ export function useJourney(path: string, interval?: number) {
 
   useEffect(() => {
     mounted.current = true;
+    setLoading(true);
+    setData(null);
     const controller = new AbortController();
     void load(controller.signal);
     const timer = interval
@@ -69,6 +71,7 @@ export function useJourney(path: string, interval?: number) {
     return () => {
       mounted.current = false;
       controller.abort();
+      inFlight.current = null;
       if (timer !== undefined) window.clearInterval(timer);
     };
   }, [interval, load]);
@@ -109,6 +112,7 @@ export function JourneyLayout({
   children,
   back = '/',
   actions,
+  loggedIn=true,
 }: {
   title: string;
   eyebrow?: string;
@@ -116,22 +120,12 @@ export function JourneyLayout({
   children: ReactNode;
   back?: string;
   actions?: ReactNode;
+  loggedIn?: boolean;
 }) {
   return (
     <>
-      <header className="topbar">
-        <Link className="brand" href="/">우연한 식탁<span>todaytable</span></Link>
-        <nav aria-label="주요 메뉴">
-          <Link href="/apply">신청하기</Link>
-          <Link href="/applications">신청 내역</Link>
-          <Link href="/history">지난 식탁</Link>
-          <Link href="/notifications">알림</Link>
-          <Link href="/profile">프로필</Link>
-          <LogoutButton />
-          {actions}
-        </nav>
-      </header>
-      <main className="page">
+      <SiteNav admin={Boolean(eyebrow?.startsWith('ADMIN'))} loggedIn={loggedIn}/>
+      <main className={`page evolution-page ${eyebrow?.startsWith('ADMIN')?'admin-page':'participant-page'}`}>
         <Link className="back-link" href={back}>← 돌아가기</Link>
         <div className="page-heading">
           {eyebrow && <div className="eyebrow">{eyebrow}</div>}
@@ -215,7 +209,7 @@ export function ApplicationCard({
       )}
       {application.table_id && <Link className="inline-link" href={`/tables/${application.table_id}`}>내 식탁 보기 →</Link>}
       <Link className="inline-link" href={`/applications/${application.id}`}>신청 상세 보기 →</Link>
-      <small className="mono">신청 번호 {application.id}</small>
+      <Link className="application-support-link" href={`/support?new=1&applicationId=${application.id}`}>이 신청에 대해 문의하기</Link><small className="mono">신청 번호 {application.id}</small>
     </article>
   );
 }

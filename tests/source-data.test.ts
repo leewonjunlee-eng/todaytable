@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -21,7 +21,7 @@ before(async () => {
   savedProvider = process.env.DATABASE_PROVIDER; savedPath = process.env.SQLITE_PATH;
   process.env.DATABASE_PROVIDER = 'sqlite'; process.env.SQLITE_PATH = join(dir, 'source.sqlite');
   ({ db } = await import('../lib/db'));
-  for (const name of ['001_foundation.sql','002_matching.sql','003_reservation.sql','004_attendance.sql','005_notification.sql','006_core_lifecycle.sql','007_lifecycle_hardening.sql','008_journey_backend.sql','009_backend_hardening.sql','010_attendance_candidates.sql','011_provisioning_push.sql','013_source_data.sql']) {
+  for (const name of (await readdir(join(process.cwd(),'db/sqlite'))).filter(n=>n.endsWith('.sql')).sort()) {
     await db.execScript(await readFile(join(process.cwd(),'db/sqlite',name),'utf8'));
   }
   ({ listSourceResponses, convertSourceResponse, removeSourceConversion } = await import('../lib/source-data'));

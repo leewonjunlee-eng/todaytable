@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildDeterministicGroups, isHardCompatible, preferredSize, type MatchCandidate } from '../lib/matching';
+import { buildDeterministicGroups, isHardCompatible, preferredSize, groupScore, type MatchCandidate } from '../lib/matching';
 
 const candidate = (id: string, eventIds = ['e1']): MatchCandidate => ({
   applicationId: id, userId: id, birthYear: 1990, gender: Number(id.slice(-1)) % 2 ? 'MAN' : 'WOMAN', mbti: 'INTJ',
@@ -45,4 +45,20 @@ test('a user may attend separate events when their times do not overlap', () => 
 test('active feedback exclusions prevent a later pair', () => {
   const a = candidate('a'); const b = { ...candidate('b'), blockedUserIds: ['a'] };
   assert.equal(isHardCompatible([a], b), false);
+});
+
+test('personalization including atmosphere changes the full score by at most ten percent',()=>{
+ const base=Array.from({length:6},(_,n)=>({...candidate(`cap-${n}`),interests:['여행'],traits:['경청'],desiredTraits:['경청']}));
+ const learned=base.map(c=>({...c,atmosphere:'CALM',signalConfidence:1,preferredInterests:['여행'],learnedInterests:['여행']}));
+ assert.ok(Math.abs(groupScore(learned)-groupScore(base))<=.1);
+ const capacity=buildDeterministicGroups(Array.from({length:8},(_,n)=>candidate(`capacity-${n}`)),'capacity',0,undefined,6);
+ assert.equal(capacity.matchedCount,6);
+});
+
+test('large cohorts compare bounded candidates reproducibly without losing eligible placements',t=>{
+ const people=Array.from({length:24},(_,n)=>({...candidate(`large-${n}`),birthYear:1990+n%8,interests:['음악','여행']}));
+ const start=performance.now(),first=buildDeterministicGroups(people,'large-cohort'),second=buildDeterministicGroups(people.slice().reverse(),'large-cohort');
+ assert.equal(first.matchedCount,24);assert.deepEqual(first,second);for(const n of [19,25])assert.equal(buildDeterministicGroups(Array.from({length:n},(_,i)=>candidate(`boundary-${i}`)),'large-boundary').matchedCount,n);
+ for(const group of first.groups){assert.ok(group.members.length>=4&&group.members.length<=6);assert.ok(Math.max(...group.members.map(m=>m.birthYear))-Math.min(...group.members.map(m=>m.birthYear))<=8);}
+ t.diagnostic(`24 participants, two deterministic runs: ${Math.round(performance.now()-start)}ms`);
 });

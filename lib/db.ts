@@ -72,10 +72,10 @@ function parseJsonColumns(row: Record<string, unknown>) {
       try { row[key] = JSON.parse(value); } catch { /* preserve malformed legacy data for inspection */ }
     }
   }
-  for (const key of ['consent_privacy', 'consent_operations', 'active']) {
+  for (const key of ['consent_privacy', 'consent_operations', 'active', 'composing', 'helpful', 'is_demo', 'learning_enabled', 'preference_confirmed', 'confirmed']) {
     if (row[key] === 0 || row[key] === 1) row[key] = row[key] === 1;
   }
-  for (const key of ['created_at', 'updated_at', 'expires_at', 'run_at', 'next_attempt_at', 'lease_until', 'completed_at', 'consented_at', 'starts_at', 'application_deadline']) {
+  for (const key of ['created_at', 'updated_at', 'read_at', 'last_public_at', 'first_response_at', 'resolved_at', 'next_followup_at', 'ends_at', 'expires_at', 'run_at', 'next_attempt_at', 'lease_until', 'completed_at', 'consented_at', 'starts_at', 'application_deadline']) {
     const value = row[key];
     if (typeof value === 'string') {
       try {

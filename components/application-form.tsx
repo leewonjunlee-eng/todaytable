@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 
 type EventOption = {
   id: string; title: string; starts_at: string; application_deadline: string;
-  area: string; capacity: number; price_cents: number;
+  is_demo:boolean; area: string; capacity: number; price_cents: number;
 };
 const passes = [
   { id: 'SINGLE', title: '1회권', price: '₩8,000', note: '한 번의 저녁' },
@@ -11,7 +11,7 @@ const passes = [
   { id: 'EXISTING_PASS', title: '보유 이용권', price: '₩0', note: '기존 3회권 사용' },
 ];
 
-export function ApplicationForm() {
+export function ApplicationForm({initialEventId=''}:{initialEventId?:string}) {
   const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
   const [events, setEvents] = useState<EventOption[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -29,13 +29,13 @@ export function ApplicationForm() {
         if (!response.ok) throw new Error('일정을 불러오지 못했습니다. 새로고침해 주세요.');
         return response.json();
       })
-      .then((rows: EventOption[]) => { if (active && Array.isArray(rows)) setEvents(rows); })
+      .then((rows: EventOption[]) => { if (active && Array.isArray(rows)) {setEvents(rows);if(rows.some(r=>r.id===initialEventId))setSelectedIds([initialEventId]);} })
       .catch((reason: unknown) => {
         if (active) setLoadError(reason instanceof Error ? reason.message : '일정을 불러오지 못했습니다.');
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [initialEventId]);
 
   function toggleEvent(id: string, checked: boolean) {
     setSelectedIds((current) => checked ? [...current, id] : current.filter((value) => value !== id));
@@ -76,7 +76,7 @@ export function ApplicationForm() {
         : <div className="event-grid">{events.map((option) => (
           <label className={`event-option ${selectedIds.includes(option.id) ? 'selected' : ''}`} key={option.id}>
             <input type="checkbox" checked={selectedIds.includes(option.id)} onChange={(event) => toggleEvent(option.id, event.target.checked)} />
-            <span className="event-area">{option.area}</span>
+            <span className="event-area">{option.area}{option.is_demo?' · 모의 회차':''}</span>
             <strong>{new Date(option.starts_at).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', timeZone: 'Asia/Seoul' })}</strong>
             <small>{new Date(option.starts_at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' })} · 최대 {option.capacity}명</small>
           </label>

@@ -51,3 +51,36 @@ test('real SQLite worker slice provisions reservation, room, topics, attendance 
   const replay = await runMatching(event, 'journey-real');
   assert.equal(replay.runId, result.runId);
 });
+
+test('cancellation preserves future job schedules and creates a fresh repair after every cancellation', async () => {
+  process.env.SESSION_SECRET = `cancellation-${randomUUID()}-secret`;
+  process.env.APP_URL = 'http://localhost';
+  const table = (await db.query<any>('SELECT id,event_id FROM dining_tables LIMIT 1')).rows[0];
+  await db.query("UPDATE events SET starts_at=datetime('now','+3 days') WHERE id=$1", [table.event_id]);
+  const scheduledBefore = (await db.query<any>(`SELECT id,status,run_at,next_attempt_at FROM scheduled_jobs
+    WHERE job_type IN ('POST_CONTENT','CLOSE_ATTENDANCE','JOURNEY_FEEDBACK_REQUEST','FEEDBACK_FOLLOWUP') ORDER BY id`)).rows;
+  const members = (await db.query<any>("SELECT user_id,application_id FROM table_members WHERE table_id=$1 AND status='ACTIVE' ORDER BY user_id", [table.id])).rows;
+  const { tokenHash } = await import('../lib/security');
+  const { POST } = await import('../app/api/applications/[id]/cancel/route');
+  const cancel = async (member: typeof members[number]) => {
+    const token = randomUUID();
+    await db.query("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES($1,$2,datetime('now','+1 hour'))", [member.user_id, tokenHash(token)]);
+    return POST(new Request(`http://localhost/api/applications/${member.application_id}/cancel`, {
+      method: 'POST', headers: { cookie: `todaytable_session=${token}`, origin: 'http://localhost', 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: '일정 변경' }),
+    }), { params: Promise.resolve({ id: member.application_id }) });
+  };
+  const first = await cancel(members[0]);
+  assert.equal(first.status, 200, JSON.stringify(await first.json()));
+  assert.deepEqual((await db.query<any>(`SELECT id,status,run_at,next_attempt_at FROM scheduled_jobs
+    WHERE job_type IN ('POST_CONTENT','CLOSE_ATTENDANCE','JOURNEY_FEEDBACK_REQUEST','FEEDBACK_FOLLOWUP') ORDER BY id`)).rows, scheduledBefore);
+  const repair = (await db.query<any>("SELECT id,job_key FROM scheduled_jobs WHERE job_type='REPAIR_TABLE'")).rows[0];
+  // A completed repair has an effect marker; subsequent cancellations need a new job.
+  await db.query("UPDATE scheduled_jobs SET status='DONE' WHERE id=$1", [repair.id]);
+  await db.query("INSERT INTO job_effects(job_id,effect_type) VALUES($1,'REPAIR_TABLE')", [repair.id]);
+  const second = await cancel(members[1]);
+  assert.equal(second.status, 200, JSON.stringify(await second.json()));
+  assert.equal((await db.query("SELECT 1 FROM scheduled_jobs WHERE job_type='REPAIR_TABLE' AND status='PENDING' AND id<>$1", [repair.id])).rowCount, 1);
+  assert.equal((await cancel(members[1])).status, 200);
+  assert.equal((await db.query("SELECT 1 FROM scheduled_jobs WHERE job_type='REPAIR_TABLE'")).rowCount, 2);
+});

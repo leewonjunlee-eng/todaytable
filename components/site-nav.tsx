@@ -1,0 +1,17 @@
+'use client';
+import Link from 'next/link';
+import {usePathname} from 'next/navigation';
+import {useEffect,useState} from 'react';
+import {ContactPanel} from './contact-panel';
+import {LogoutButton} from './logout-button';
+const adminLinks=[['/admin','오늘의 운영','◷'],['/admin/inbox','공동 문의함','✉'],['/admin/matching','매칭 스튜디오','⋈'],['/admin/insights','후기와 인사이트','✧'],['/admin/applications','참가 신청','☷'],['/admin/events','회차 관리','▦'],['/admin/venues','식당 관리','⌂'],['/admin/reservation','식탁·예약','◌'],['/admin/attendance','참석 현황','✓'],['/admin/exceptions','예외 처리','!'],['/admin/operations','작업·알림','↻'],['/admin/safety','안전 검토','♧'],['/admin/team','운영 설정','⚙']];
+export function SiteNav({admin=false,loggedIn=true}:{admin?:boolean;loggedIn?:boolean}){
+ const path=usePathname();const [unread,setUnread]=useState(0);
+ useEffect(()=>{if(!admin)return;let active=true;const load=()=>fetch('/api/support').then(r=>r.ok?r.json():null).then(d=>{if(active)setUnread(d?.tickets?.filter((t:any)=>t.unread&&t.status!=='RESOLVED').length??0);}).catch(()=>{});void load();const timer=setInterval(load,15000);return()=>{active=false;clearInterval(timer);};},[admin]);
+ const brand=<Link className="brand" href={admin?'/admin':'/'}>우연한 식탁<span>서로의 이야기가 머무는 곳</span></Link>;
+ return <>{admin&&<aside className="admin-sidebar">{brand}<span className="workspace-label">운영 워크스페이스</span><nav aria-label="운영 메뉴">{adminLinks.map(([url,label,icon])=><Link key={url} className={path===url?'active':''} href={url}><i>{icon}</i>{label}{url==='/admin/inbox'&&unread>0&&<b>{unread}</b>}</Link>)}</nav><div className="sidebar-footer"><Link href="/admin/source-data">원본 설문 데이터 ↗</Link><Link href="/">참가자 홈 ↗</Link><LogoutButton/></div></aside>}
+ <header className={`topbar ${admin?'admin-topbar':''}`}>{brand}<nav aria-label="주요 메뉴">{admin?<><span className="workspace-live"><i/>함께 운영 중</span><Link href="/admin/inbox">문의함{unread>0?` (${unread})`:''}</Link></>:<><Link href="/apply">매칭 신청</Link><Link href="/applications">내 식탁</Link><Link href="/history">지난 이야기</Link><Link href="/support">문의</Link><Link href="/profile">마이</Link>{loggedIn?<LogoutButton/>:<Link className="nav-login" href="/login">로그인</Link>}</>}</nav></header>
+ {admin&&<nav className="admin-mobile-menu" aria-label="모바일 운영 메뉴"><details key={path}><summary>운영 메뉴 · {adminLinks.find(([url])=>url===path)?.[1]??'오늘의 운영'}</summary><div>{adminLinks.map(([url,label])=><Link href={url} key={url} aria-current={path===url?'page':undefined}>{label}</Link>)}</div></details></nav>}
+ {!admin&&loggedIn&&<nav className="mobile-dock" aria-label="모바일 메뉴">{[['/','⌂','홈'],['/applications','◌','내 식탁'],['/support','✉','문의'],['/profile','♧','마이']].map(([url,icon,label])=><Link className={path===url?'active':''} key={url} href={url}><span>{icon}</span>{label}</Link>)}</nav>}
+ {!admin&&path!=='/support'&&!(path==='/'&&!loggedIn)&&<ContactPanel loggedIn={loggedIn}/>}</>;
+}

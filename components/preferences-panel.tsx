@@ -1,0 +1,10 @@
+'use client';
+import {FormEvent,useEffect,useState} from 'react';
+import {ATMOSPHERES} from '@/lib/feedback-domain';
+import {FormNotice,journeyFetch,JourneyState,useJourney} from './journey-ui';
+export function PreferencesPanel(){
+ const q=useJourney('/api/preferences');const [atmosphere,setAtmosphere]=useState('BALANCED'),[interests,setInterests]=useState(''),[confirmed,setConfirmed]=useState(false),[enabled,setEnabled]=useState(true),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+ useEffect(()=>{if(q.data){setAtmosphere(q.data.atmosphere);setInterests(q.data.interests.join(', '));setConfirmed(q.data.confirmed);setEnabled(q.data.learningEnabled);}},[q.data]);
+ async function save(e:FormEvent){e.preventDefault();if(busy)return;setBusy(true);setMessage('');try{await journeyFetch('/api/preferences',{method:'PUT',body:JSON.stringify({atmosphere,interests:interests.split(',').map(x=>x.trim()).filter(Boolean),confirmed,learningEnabled:enabled})});await q.refresh();setMessage('다음 만남 선호를 저장했어요.');}catch(e){setMessage(e instanceof Error?e.message:'저장하지 못했어요.');}finally{setBusy(false);}}
+ return <section className="panel preferences-panel"><h2>다음 만남 선호</h2><JourneyState {...q} onRefresh={q.refresh}><form className="form-stack" onSubmit={save}><label>대화 분위기<select value={atmosphere} onChange={e=>setAtmosphere(e.target.value)}>{Object.entries(ATMOSPHERES).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label>관심사<input value={interests} onChange={e=>setInterests(e.target.value)} placeholder="독서, 여행"/></label><label className="check-label"><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>명시한 선호를 매칭에 반영</label><label className="check-label"><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/>후기 기반 개인화 사용</label><p className="muted">확인된 실제 후기 근거 {q.data?.evidenceCount??0}개 · 3개 이상부터 최대 10% 반영. 개인화를 끄면 명시 선호와 후기 신호의 적용을 중단합니다. 체크를 해제하고 저장하면 언제든 철회할 수 있어요.</p><button className="button quiet" disabled={busy}>{busy?'저장 중…':'선호 저장'}</button><FormNotice message={message}/></form></JourneyState></section>;
+}

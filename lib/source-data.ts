@@ -88,13 +88,13 @@ export async function convertSourceResponse(key: { dataset_sha256: string; sheet
     if (databaseProvider === 'postgres') await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`${key.dataset_sha256}:${key.sheet_name}:${key.sheet_row}`]);
     const existing = await client.query<any>('SELECT user_id,event_id,application_id,payment_id,assumptions FROM source_demo_conversions WHERE dataset_sha256=$1 AND sheet_name=$2 AND sheet_row=$3', [key.dataset_sha256,key.sheet_name,key.sheet_row]);
     if (existing.rows[0]) { await client.query('COMMIT'); return { ...existing.rows[0], assumptions: parse(existing.rows[0].assumptions) }; }
-    await client.query("INSERT INTO users(id,email,password_hash,role) VALUES($1,$2,$3,'PARTICIPANT')", [userId, `demo+${pseudo}@todaytable.invalid`, `DEMO_ONLY_${pseudo}`]);
+    await client.query("INSERT INTO users(id,email,password_hash,role,is_demo) VALUES($1,$2,$3,'PARTICIPANT',TRUE)", [userId, `demo+${pseudo}@todaytable.invalid`, `DEMO_ONLY_${pseudo}`]);
     await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,occupation,mbti,interests,traits,desired_traits,food_budgets,dietary_notes,consent_privacy,consent_operations,consent_version)
       VALUES($1,$2,'',$3,$4,'',$5,$6,$7,$8,$9,'',true,true,'demo-only')`, [userId, `DEMO · source row ${source.sheet_row} · ${pseudo}`, AGE_REFERENCE_YEAR - age, gender, profileMbti, choices(fields.interests ?? ''), choices(fields.traits ?? ''), choices(fields.desired_traits ?? ''), choices(fields.food_budgets ?? '')]);
-    await client.query(`INSERT INTO events(id,title,starts_at,application_deadline,area,capacity,price_cents,status,created_by)
-      VALUES($1,$2,$3,$4,$5,1000,$6,'CLOSED',$7) ON CONFLICT(id) DO NOTHING`, [eventId, `DEMO ONLY · ${new Date(startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Seoul'})} · ${area}`, startsAt, deadline, area, amount, adminId]);
-    await client.query(`INSERT INTO applications(id,user_id,request_key,status,matching_status,pass_choice,pass_uses,amount_cents)
-      VALUES($1,$2,$3,'SUBMITTED','WAITING',$4,$5,$6)`, [appId,userId,requestKey,uses === 3 ? 'THREE_PASS' : 'SINGLE',uses,amount]);
+    await client.query(`INSERT INTO events(id,title,starts_at,application_deadline,area,capacity,price_cents,status,created_by,is_demo)
+      VALUES($1,$2,$3,$4,$5,1000,$6,'CLOSED',$7,TRUE) ON CONFLICT(id) DO NOTHING`, [eventId, `DEMO ONLY · ${new Date(startsAt).toLocaleDateString('sv-SE',{timeZone:'Asia/Seoul'})} · ${area}`, startsAt, deadline, area, amount, adminId]);
+    await client.query(`INSERT INTO applications(id,user_id,request_key,status,matching_status,pass_choice,pass_uses,amount_cents,is_demo)
+      VALUES($1,$2,$3,'SUBMITTED','WAITING',$4,$5,$6,TRUE)`, [appId,userId,requestKey,uses === 3 ? 'THREE_PASS' : 'SINGLE',uses,amount]);
     await client.query('INSERT INTO application_options(application_id,event_id) VALUES($1,$2)', [appId,eventId]);
     await client.query(`INSERT INTO payments(id,application_id,idempotency_key,status,amount_cents,provider)
       VALUES($1,$2,$3,'PAID',$4,'MOCK')`, [paymentId,appId,`demo:${pseudo}`,amount]);

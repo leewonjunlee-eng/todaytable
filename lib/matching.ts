@@ -1,6 +1,7 @@
 export type MatchCandidate = {
   applicationId: string; userId: string; birthYear: number; gender: string; mbti: string;
   interests: string[]; traits: string[]; desiredTraits: string[]; eventIds: string[]; paid: boolean; valid: boolean;
+  atmosphere?: string; preferredInterests?: string[]; learnedInterests?: string[]; signalConfidence?: number;
   priorUserIds?: string[]; blockedUserIds?: string[]; eventTimes?: Record<string,{ startsAt:string; endsAt:string }>;
 };
 export type MatchGroup = { members: MatchCandidate[]; score: number; explanation: string; eventId?: string };
@@ -36,7 +37,14 @@ function pairScore(a: MatchCandidate, b: MatchCandidate, weights = DEFAULT_WEIGH
   const interest = overlap(a.interests, b.interests) / Math.max(1, Math.max(a.interests.length, b.interests.length));
   const trait = (overlap(a.desiredTraits, b.traits) + overlap(b.desiredTraits, a.traits)) / Math.max(1, a.desiredTraits.length + b.desiredTraits.length);
   const novelty = (a.priorUserIds ?? []).includes(b.userId) || (b.priorUserIds ?? []).includes(a.userId) ? 0 : 1;
-  return genderPair(a, b) * weights.gender + mbtiHeuristic(a.mbti, b.mbti) * weights.mbti + interest * weights.interests + trait * weights.traits + novelty * weights.novelty;
+  const atmosphere=a.atmosphere&&b.atmosphere&&a.atmosphere!=='BALANCED'&&b.atmosphere!=='BALANCED'?(a.atmosphere===b.atmosphere?1:.25):.5;
+  const base=genderPair(a,b)*weights.gender+mbtiHeuristic(a.mbti,b.mbti)*weights.mbti+interest*weights.interests+trait*weights.traits+novelty*weights.novelty;
+  const evidence=Math.min(1,Math.max(a.signalConfidence??0,b.signalConfidence??0));
+  if(!evidence)return base;
+  const preferred=(person:MatchCandidate,peer:MatchCandidate)=>{const interests=[...(person.preferredInterests??[]),...(person.learnedInterests??[])];return interests.length?overlap(interests,peer.interests)/Math.max(1,new Set(interests).size):.5;};
+  const signal=(preferred(a,b)+preferred(b,a)+atmosphere)/3;
+  const influence=.1*evidence;
+  return base*(1-influence)+signal*influence;
 }
 function groupGenderBalance(group: MatchCandidate[]) {
   const known = group.filter((m) => m.gender && !['PREFER_NOT_TO_SAY', 'UNKNOWN'].includes(m.gender));
@@ -56,7 +64,7 @@ export function isHardCompatible(group: MatchCandidate[], candidate: MatchCandid
   if (!shareEvent(group, candidate)) return false;
   if (group.length && Math.max(...group.map((m) => m.birthYear), candidate.birthYear) - Math.min(...group.map((m) => m.birthYear), candidate.birthYear) > 8) return false;
   // The minimum is a group-level quality floor, not merely the last pair.
-  return group.length === 0 || groupScore([...group, candidate], weights) >= minScore;
+  return group.length === 0 || (minScore <= 0 && Object.values(weights).every(weight => weight >= 0)) || groupScore([...group, candidate], weights) >= minScore;
 }
 export function preferredSize(n: number) {
   if (n < 4) return 0;
@@ -66,10 +74,11 @@ export function preferredSize(n: number) {
   if (n === 9) return 5;
   if (n === 10) return 6;
   if (n === 11) return 6;
-  return 6;
+  // Avoid leaving seven people after taking a six-person table.
+  return n % 6 === 1 ? 5 : 6;
 }
 /** Bounded deterministic search: maximize placements first, then whole-group quality. */
-export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v1', minScore = 0, weights: MatchWeights = DEFAULT_WEIGHTS) {
+export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v1', minScore = 0, weights: MatchWeights = DEFAULT_WEIGHTS, maxSeats = Number.POSITIVE_INFINITY) {
   const hash = (id: string) => { let h = 2166136261; for (const c of `${seed}:${id}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
   const eligible = candidates.filter((c) => c.paid && c.valid).slice().sort((a, b) => hash(a.applicationId) - hash(b.applicationId) || a.applicationId.localeCompare(b.applicationId));
   const key = (group: MatchCandidate[]) => group.map((m) => m.applicationId).sort().join(',');
@@ -98,7 +107,7 @@ export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v
     }
     if (pool.length < 4 || count + pool.length < bestCount) return;
     for (const size of [6, 5, 4]) {
-      if (pool.length < size) continue;
+      if (pool.length < size || count + size > maxSeats) continue;
       for (const group of groupsFor(pool, size)) {
         const ids = new Set(group.map((m) => m.applicationId));
         search(pool.filter((m) => !ids.has(m.applicationId) && !overlapsForSameUser(group,m)), [...chosen, group], quality + groupScore(group, weights));
@@ -106,12 +115,14 @@ export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v
     }
   };
   if (eligible.length > 18) {
-    // Large cohorts use a deterministic first-fit heuristic; exhaustive partitioning
-    // is intentionally reserved for small cohorts where optimal comparison is cheap.
+    // Large cohorts compare a bounded set of complete groups by quality.
     let pool = eligible.slice();
-    while (pool.length >= 4) {
-      const size = preferredSize(pool.length) || 4;
-      const group = groupsFor(pool, Math.min(size, pool.length))[0];
+    while (pool.length >= 4 && maxSeats - bestGroups.reduce((n,g)=>n+g.length,0) >= 4) {
+      const available=Math.min(pool.length,maxSeats-bestGroups.reduce((n,g)=>n+g.length,0));
+      const size = preferredSize(available) || 4;
+      let possibilities=groupsFor(pool,Math.min(size,pool.length));
+      if(!possibilities.length)for(const fallback of [5,4])if(fallback<size){possibilities=groupsFor(pool,fallback);if(possibilities.length)break;}
+      const group=possibilities.map(members=>({members,score:groupScore(members,weights),key:key(members)})).sort((a,b)=>b.score-a.score||a.key.localeCompare(b.key))[0]?.members;
       if (!group) break;
       bestGroups.push(group);
       const used = new Set(group.map((m) => m.applicationId));

@@ -32,9 +32,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       const remaining = await client.query<any>(`SELECT count(*)::int count FROM table_members WHERE table_id=$1 AND status='ACTIVE'`, [row.table_id], `SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'`);
       if (Number(remaining.rows[0]?.count ?? 0) < 4) {
         await client.query(`UPDATE dining_tables SET status='EXCEPTION' WHERE id=$1`, [row.table_id]);
-        await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,now()) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=now(),last_error=NULL`, [`repair:${row.table_id}`, JSON.stringify({ tableId: row.table_id, eventId: row.event_id })], `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=CURRENT_TIMESTAMP,last_error=NULL`);
+        await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,now()) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=now(),last_error=NULL`, [`repair:${row.table_id}:${id}`, JSON.stringify({ tableId: row.table_id, eventId: row.event_id })], `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=CURRENT_TIMESTAMP,last_error=NULL`);
       }
-      await client.query(`UPDATE scheduled_jobs SET status='PENDING',lease_owner=NULL,lease_until=NULL,next_attempt_at=now(),last_error='member cancelled' WHERE payload->>'tableId'=$1 AND status IN ('PENDING','RUNNING')`, [row.table_id], `UPDATE scheduled_jobs SET status='PENDING',lease_owner=NULL,lease_until=NULL,next_attempt_at=CURRENT_TIMESTAMP,last_error='member cancelled' WHERE json_extract(payload,'$.tableId')=?1 AND status IN ('PENDING','RUNNING')`);
     }
     let refundRequested=false;
     if (cancellationStatus === 'CANCELED_EARLY' && row.pass_choice==='SINGLE' && row.payment_status==='PAID' && Number(row.amount_cents)>0) {

@@ -62,3 +62,10 @@ docker-compose.yml
 # Git
 .git
 .gitignore
+
+# Historical notes and original meeting media are not runtime inputs
+docs/archive/
+captures/
+kickoff_audio.m4a
+kickoff_transcript.txt
+Screenshot*.png

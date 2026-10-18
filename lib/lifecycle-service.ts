@@ -1,6 +1,9 @@
+import {normalizeInterests} from './feedback-domain';
 import { createHash, randomUUID } from 'node:crypto';
 import { databaseProvider, db, type QueryClient } from './db';
 import { buildDeterministicGroups, isHardCompatible, groupScore, type MatchCandidate, type MatchWeights } from './matching';
+
+import {matchingInput,effectivePolicy,explainGroup,enrichCandidates,matchingPlan} from './matching-policy';
 
 const json = (v: unknown) => JSON.stringify(v);
 const parse = <T>(v: unknown, fallback: T): T => { if (typeof v !== 'string') return (v as T) ?? fallback; try { return JSON.parse(v) as T; } catch { return fallback; } };
@@ -54,17 +57,19 @@ export async function provisionTable(client: QueryClient, tableId: string, event
       throw new Error('Journey message schema is not provisioned.');
     }
   }
-  const attendance = await client.query<any>('SELECT application_id FROM table_members WHERE table_id=$1', [tableId]);
+  const attendance = await client.query<any>("SELECT application_id FROM table_members WHERE table_id=$1 AND status='ACTIVE'", [tableId]);
+  const schedule = await client.query<{ match_run_id: string }>('SELECT match_run_id FROM dining_tables WHERE id=$1', [tableId]);
+  const scheduleKey = `${tableId}:${schedule.rows[0].match_run_id}`;
   const reminderAt = new Date(new Date(row.starts_at).getTime() - 24 * 60 * 60 * 1000);
   const feedbackAt = new Date(new Date(row.ends_at).getTime());
   for (const member of attendance.rows) {
     await client.query(`INSERT INTO attendance_records(application_id,event_id,status) VALUES($1,$2,'SCHEDULED') ON CONFLICT(application_id,event_id) DO NOTHING`, [member.application_id, eventId]);
-    await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'JOURNEY_REMINDER',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`journey-reminder:${tableId}:${member.application_id}`, json({ tableId, applicationId: member.application_id }), reminderAt]);
+    await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'JOURNEY_REMINDER',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`journey-reminder:${scheduleKey}:${member.application_id}`, json({ tableId, applicationId: member.application_id }), reminderAt]);
   }
-  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'JOURNEY_FEEDBACK_REQUEST',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`journey-feedback:${tableId}`, json({ tableId }), feedbackAt]);
-  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'POST_CONTENT',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`content:${eventId}:${tableId}:v1`, json({ eventId, tableId }), row.starts_at]);
-  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'CLOSE_ATTENDANCE',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`close-attendance:${tableId}`, json({ tableId, eventId }), row.ends_at]);
-  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'FEEDBACK_FOLLOWUP',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`feedback-followup:${tableId}`, json({ tableId }), new Date(feedbackAt.getTime() + 24 * 60 * 60 * 1000)]);
+  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'JOURNEY_FEEDBACK_REQUEST',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`journey-feedback:${scheduleKey}`, json({ tableId }), feedbackAt]);
+  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'POST_CONTENT',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`content:${eventId}:${scheduleKey}:v1`, json({ eventId, tableId }), row.starts_at]);
+  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'CLOSE_ATTENDANCE',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`close-attendance:${scheduleKey}`, json({ tableId, eventId }), row.ends_at]);
+  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'FEEDBACK_FOLLOWUP',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`feedback-followup:${scheduleKey}`, json({ tableId }), new Date(feedbackAt.getTime() + 24 * 60 * 60 * 1000)]);
   for (const member of members) await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by) VALUES($1,$2,$3,'IN_APP','SENT',$2)`, [eventId, member.userId, '식탁이 확정되었어요. 채팅방에서 인사를 나눠 보세요.']);
 }
 
@@ -76,7 +81,8 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     if (databaseProvider === 'postgres') await client.query("SELECT pg_advisory_xact_lock(hashtextextended('todaytable:lifecycle',0))");
     const table = await client.query<any>('SELECT id,event_id,match_run_id,status FROM dining_tables WHERE id=$1', [tableId]);
     if (!table.rowCount) throw new Error('Repair table not found.');
-    const actualEventId = eventId ?? table.rows[0].event_id;
+    // The persisted event is authoritative after an earlier repair moves the table.
+    const actualEventId = table.rows[0].event_id;
     const activeCount=await client.query<any>("SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'",[tableId]);
     if(table.rows[0].status==='CONFIRMED'&&Number(activeCount.rows[0]?.count??0)>=4){if(own)await client.query('COMMIT');return {status:'REPAIRED',tableId};}
     const activeMembers = await client.query<any>(`SELECT a.id application_id,a.user_id,a.status application_status FROM table_members tm JOIN applications a ON a.id=tm.application_id WHERE tm.table_id=$1 AND tm.status='ACTIVE'`,[tableId]);
@@ -105,31 +111,39 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     const blocked = new Map<string,string[]>(); for (const x of rel.rows) blocked.set(x.source_user_id,[...(blocked.get(x.source_user_id)??[]),x.target_user_id]);
     const allEventTimes=await client.query<any>("SELECT id,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events",[],"SELECT id,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events");
     const repairTimes=Object.fromEntries(allEventTimes.rows.map((e:any)=>[e.id,{startsAt:e.starts_at,endsAt:e.ends_at}]));
-    const candidates: MatchCandidate[] = all.map((r) => ({ applicationId:r.application_id,userId:r.user_id,birthYear:Number(r.birth_year),gender:r.gender,mbti:r.mbti,interests:parse(r.interests,[]),traits:parse(r.traits,[]),desiredTraits:parse(r.desired_traits,[]),eventIds:options.get(r.application_id)??[],eventTimes:repairTimes,paid:true,valid:true,blockedUserIds:blocked.get(r.user_id) }));
+    const historyRows=(await client.query<any>('SELECT user_id,other_user_id FROM match_history')).rows;
+    const otherSeats=(await client.query<any>("SELECT tm.user_id,t.event_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE tm.status='ACTIVE' AND tm.table_id<>$1",[tableId])).rows;
+    const candidates: MatchCandidate[] = all.map((r) => ({ applicationId:r.application_id,userId:r.user_id,birthYear:Number(r.birth_year),gender:r.gender,mbti:r.mbti,interests:normalizeInterests(parse(r.interests,[])),traits:parse(r.traits,[]),desiredTraits:parse(r.desired_traits,[]),eventIds:options.get(r.application_id)??[],eventTimes:repairTimes,paid:true,valid:true,blockedUserIds:blocked.get(r.user_id),priorUserIds:historyRows.filter(h=>h.user_id===r.user_id).map(h=>h.other_user_id) }));
     const eligibleIds = new Set(existing.rows.map((r:any)=>r.application_id));
     for(const member of activeMembers.rows) if(!eligibleIds.has(member.application_id)) {
       await client.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND application_id=$2 AND status='ACTIVE'",[tableId,member.application_id]);
       if(member.application_status==='SUBMITTED') await client.query("UPDATE applications SET matching_status='NO_MATCH',updated_at=now() WHERE id=$1",[member.application_id],"UPDATE applications SET matching_status='NO_MATCH',updated_at=CURRENT_TIMESTAMP WHERE id=$1");
     }
     const survivorIds = new Set(existing.rows.map((r:any)=>r.application_id));
-    const rules = await client.query<any>('SELECT min_score,weights FROM matching_rules WHERE id=1').catch(()=>({rows:[]}));
-    const weights = parse<MatchWeights>(rules.rows[0]?.weights,{gender:.4,mbti:.25,interests:.2,traits:.1,novelty:.05});
-    const minScore = Number(rules.rows[0]?.min_score??0);
+    let policy = await effectivePolicy(client, actualEventId);
+    let selectedWeights = policy.weights;
     let best: MatchCandidate[] | undefined; let selectedEventId=actualEventId; let repairPool:MatchCandidate[]=[];
     const possibleIds=Array.from(new Set([actualEventId,...existing.rows.flatMap((r:any)=>options.get(r.application_id)??[])]));
     const placeholders=possibleIds.map((_,i)=>`$${i+1}`).join(',')||'NULL';
     const eventInfo=await client.query<any>(`SELECT id,status,application_deadline,capacity,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events WHERE id IN (${placeholders})`,possibleIds,`SELECT id,status,application_deadline,capacity,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events WHERE id IN (${placeholders})`);
-    const eventRows=eventInfo.rows.filter((e:any)=>e.status==='CLOSED'||new Date(e.application_deadline).getTime()<=Date.now());
-    for(const event of eventRows) {
-      const pool=candidates.filter(c=>c.eventIds.includes(event.id)); repairPool=pool;
+    const eventRows = eventInfo.rows.filter((e: any) =>
+      ['OPEN', 'CLOSED'].includes(e.status) &&
+      new Date(e.starts_at).getTime() > Date.now() &&
+      (e.status === 'CLOSED' || new Date(e.application_deadline).getTime() <= Date.now()),
+    );
+    for(const event of eventRows.sort((a:any,b:any)=>Number(b.id===actualEventId)-Number(a.id===actualEventId)||a.id.localeCompare(b.id))) {
+      const eventPolicy = await effectivePolicy(client, event.id);
+      const weights = eventPolicy.weights, minScore = eventPolicy.minScore;
+      const pool=await enrichCandidates(client,candidates.filter(c=>c.eventIds.includes(event.id)&&!otherSeats.some(s=>s.user_id===c.userId&&repairTimes[s.event_id]&&new Date(event.starts_at).getTime()<new Date(repairTimes[s.event_id].endsAt).getTime()&&new Date(repairTimes[s.event_id].startsAt).getTime()<new Date(event.ends_at).getTime())),eventPolicy.learningEnabled); repairPool=pool;
       const required=pool.filter(c=>survivorIds.has(c.applicationId));
       if(required.length!==survivorIds.size||required.length>6) continue;
       const extras=pool.filter(c=>!survivorIds.has(c.applicationId));
       const ordered:MatchCandidate[]=[];
       for(const x of required){if(!isHardCompatible(ordered,x,minScore,weights)){ordered.length=0;break;}ordered.push(x);}
       if(ordered.length!==required.length) continue;
-      let eventBest:MatchCandidate[]|undefined;
+      let eventBest:MatchCandidate[]|undefined;let explored=0;
       const choose=(start:number,group:MatchCandidate[])=>{
+        if(++explored>50000)return;
         if(group.length>=4&&group.length<=6&&required.every(x=>group.some(y=>y.applicationId===x.applicationId))&&groupScore(group,weights)>=minScore&&(!eventBest||groupScore(group,weights)>groupScore(eventBest,weights)))eventBest=group.slice();
         if(group.length===6)return;
         for(let i=start;i<extras.length;i++){const x=extras[i];if(isHardCompatible(group,x,minScore,weights))choose(i+1,[...group,x]);}
@@ -138,18 +152,29 @@ export async function repairTable(tableId: string, eventId?: string, connection?
       if(!eventBest) continue;
       const occupied=await client.query<any>(`SELECT count(*)::int count FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND t.id<>$2 AND tm.status='ACTIVE'`,[event.id,tableId],`SELECT count(*) count FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND t.id<>$2 AND tm.status='ACTIVE'`);
       if(Number(occupied.rows[0]?.count??0)+eventBest.length>Number(event.capacity)) continue;
-      best=eventBest; selectedEventId=event.id; break;
+      best=eventBest; selectedEventId=event.id;
+      policy = eventPolicy;
+      selectedWeights = eventPolicy.weights;
+      break;
     }
     if (best) {
+      // Retire the previous schedule before provisioning the repaired table.
+      // New jobs use the new match run so old effect markers cannot suppress them.
+      await client.query(`UPDATE scheduled_jobs SET status='DONE',completed_at=now(),lease_owner=NULL,lease_until=NULL
+        WHERE payload->>'tableId'=$1 AND status IN ('PENDING','RUNNING')
+          AND job_type IN ('JOURNEY_REMINDER','JOURNEY_FEEDBACK_REQUEST','POST_CONTENT','CLOSE_ATTENDANCE','FEEDBACK_FOLLOWUP')`, [tableId],
+        `UPDATE scheduled_jobs SET status='DONE',completed_at=CURRENT_TIMESTAMP,lease_owner=NULL,lease_until=NULL
+        WHERE json_extract(payload,'$.tableId')=$1 AND status IN ('PENDING','RUNNING')
+          AND job_type IN ('JOURNEY_REMINDER','JOURNEY_FEEDBACK_REQUEST','POST_CONTENT','CLOSE_ATTENDANCE','FEEDBACK_FOLLOWUP')`);
       const nowRun = randomUUID();
-      await client.query(`INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,'repair-v1',$3,${pgJson('$4')},'COMPLETED',$5,$6,now())`,[nowRun,selectedEventId,`repair:${tableId}`,json({tableId,eventId:selectedEventId,applications:best.map(x=>x.applicationId)}),best.length,groupScore(best,weights)],`INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,'repair-v1',$3,$4,'COMPLETED',$5,$6,CURRENT_TIMESTAMP)`);
+      await client.query(`INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$7,$3,${pgJson('$4')},'COMPLETED',$5,$6,now())`,[nowRun,selectedEventId,`repair:${tableId}`,json({tableId,eventId:selectedEventId,policy,candidates:best,applications:best.map(x=>x.applicationId)}),best.length,groupScore(best,selectedWeights),policy.id],`INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$7,$3,$4,'COMPLETED',$5,$6,CURRENT_TIMESTAMP)`);
       const chosenApps=new Set(best.map(x=>x.applicationId));
       for(const member of existing.rows) if(!chosenApps.has(member.application_id)) await client.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND application_id=$2 AND status='ACTIVE'",[tableId,member.application_id]);
-      if(selectedEventId!==actualEventId){const next=await client.query<any>('SELECT COALESCE(MAX(table_number),0)+1 table_number FROM dining_tables WHERE event_id=$1',[selectedEventId]);await client.query("UPDATE dining_tables SET event_id=$2,table_number=$3,status='CONFIRMED',match_run_id=$4,quality_score=$5,provision_status='PENDING' WHERE id=$1",[tableId,selectedEventId,Number(next.rows[0].table_number),nowRun,groupScore(best,weights)]);await client.query('UPDATE attendance_records SET event_id=$2 WHERE application_id IN (SELECT application_id FROM table_members WHERE table_id=$1 AND status=\'ACTIVE\')',[tableId,selectedEventId]);}
-      else await client.query("UPDATE dining_tables SET status='CONFIRMED',match_run_id=$2,quality_score=$3,provision_status='PENDING' WHERE id=$1",[tableId,nowRun,groupScore(best,weights)]);
+      if(selectedEventId!==actualEventId){const next=await client.query<any>('SELECT COALESCE(MAX(table_number),0)+1 table_number FROM dining_tables WHERE event_id=$1',[selectedEventId]);await client.query("UPDATE dining_tables SET event_id=$2,table_number=$3,status='CONFIRMED',match_run_id=$4,quality_score=$5,provision_status='PENDING' WHERE id=$1",[tableId,selectedEventId,Number(next.rows[0].table_number),nowRun,groupScore(best,selectedWeights)]);await client.query('UPDATE attendance_records SET event_id=$2 WHERE application_id IN (SELECT application_id FROM table_members WHERE table_id=$1 AND status=\'ACTIVE\')',[tableId,selectedEventId]);}
+      else await client.query("UPDATE dining_tables SET status='CONFIRMED',match_run_id=$2,quality_score=$3,provision_status='PENDING' WHERE id=$1",[tableId,nowRun,groupScore(best,selectedWeights)]);
       for(const c of best){await client.query("INSERT INTO table_members(table_id,application_id,user_id,status) VALUES($1,$2,$3,'ACTIVE') ON CONFLICT(table_id,user_id) DO UPDATE SET application_id=excluded.application_id,status='ACTIVE'",[tableId,c.applicationId,c.userId]);await client.query("UPDATE applications SET matching_status='CONFIRMED',updated_at=now() WHERE id=$1",[c.applicationId],"UPDATE applications SET matching_status='CONFIRMED',updated_at=CURRENT_TIMESTAMP WHERE id=$1");}
       for(const a of best) for(const b of best) if(a.userId!==b.userId) await client.query('INSERT INTO match_history(id,table_id,user_id,other_user_id) VALUES($1,$2,$3,$4) ON CONFLICT(table_id,user_id,other_user_id) DO NOTHING',[randomUUID(),tableId,a.userId,b.userId]);
-      for(const c of best) await client.query(`INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'REPAIRED',$5,${pgJson('$6')})`,[randomUUID(),nowRun,c.applicationId,tableId,'표의 인원을 재배치했습니다.',json({score:groupScore(best,weights),visible:'privacy-safe'})],`INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'REPAIRED',$5,$6)`);
+      for(const c of best) await client.query(`INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'REPAIRED',$5,${pgJson('$6')})`,[randomUUID(),nowRun,c.applicationId,tableId,'표의 인원을 재배치했습니다.',json({score:groupScore(best,selectedWeights),visible:'privacy-safe'})],`INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'REPAIRED',$5,$6)`);
       await client.query("UPDATE lifecycle_exceptions SET status='RESOLVED',resolved_at=now() WHERE source='repair_table' AND entity_id=$1 AND status<>'RESOLVED'",[tableId],"UPDATE lifecycle_exceptions SET status='RESOLVED',resolved_at=CURRENT_TIMESTAMP WHERE source='repair_table' AND entity_id=$1 AND status<>'RESOLVED'");
       await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'PROVISION_TABLE',$2,now()) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=now(),last_error=NULL`,[`provision:${tableId}:repair:${nowRun}`,json({tableId,eventId:selectedEventId})],`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'PROVISION_TABLE',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=CURRENT_TIMESTAMP,last_error=NULL`);
       if(own) await client.query('COMMIT');
@@ -181,79 +206,38 @@ export async function runMatching(eventId: string, seed = 'core-v1', connection?
       if (own) await client.query('COMMIT');
       return { runId: '', matchedCount: 0, qualityScore: 0, unmatched: [], groups: [] };
     }
-    const already = await client.query<{id:string;matched_count:number;quality_score:number}>('SELECT id,matched_count,quality_score FROM match_runs WHERE event_id=$1 AND status=\'COMPLETED\' ORDER BY created_at DESC LIMIT 1', [eventId]);
+    const already = await client.query<{id:string;matched_count:number;quality_score:number;input_snapshot:unknown}>('SELECT id,matched_count,quality_score,input_snapshot FROM match_runs WHERE event_id=$1 AND status=\'COMPLETED\' ORDER BY created_at DESC LIMIT 1', [eventId]);
     if (already.rowCount) {
       if (own) await client.query('COMMIT');
-      return { runId: already.rows[0].id, matchedCount: Number(already.rows[0].matched_count), qualityScore: Number(already.rows[0].quality_score), unmatched: [], groups: [] };
+      const summary=parse<any>(already.rows[0].input_snapshot,{}).result;
+      return { runId: already.rows[0].id, matchedCount: Number(already.rows[0].matched_count), qualityScore: Number(already.rows[0].quality_score), unmatched: [], groups: [], ...summary };
     }
-    const rows = await client.query<any>(
-      `SELECT DISTINCT a.id application_id,a.user_id,a.matching_status,p.status payment_status,
-              pr.birth_year,pr.gender,pr.mbti,pr.interests,pr.traits,pr.desired_traits
-       FROM applications a JOIN users u ON u.id=a.user_id JOIN payments p ON p.application_id=a.id
-       JOIN profiles pr ON pr.user_id=a.user_id JOIN application_options o ON o.application_id=a.id
-       JOIN events e ON e.id=o.event_id
-       WHERE a.status='SUBMITTED' AND u.restricted_status='ACTIVE' AND a.matching_status IN ('WAITING','REALLOCATING')
-         AND p.status='PAID' AND pr.consent_privacy AND pr.consent_operations
-         AND e.status IN ('OPEN','CLOSED')
-         AND NOT EXISTS (SELECT 1 FROM table_members tm WHERE tm.application_id=a.id AND tm.status='ACTIVE')`,
-      [],
-      `SELECT DISTINCT a.id application_id,a.user_id,a.matching_status,p.status payment_status,
-              pr.birth_year,pr.gender,pr.mbti,pr.interests,pr.traits,pr.desired_traits
-       FROM applications a JOIN users u ON u.id=a.user_id JOIN payments p ON p.application_id=a.id JOIN profiles pr ON pr.user_id=a.user_id
-       JOIN application_options o ON o.application_id=a.id JOIN events e ON e.id=o.event_id
-       WHERE a.status='SUBMITTED' AND u.restricted_status='ACTIVE' AND a.matching_status IN ('WAITING','REALLOCATING') AND p.status='PAID'
-         AND pr.consent_privacy=1 AND pr.consent_operations=1 AND e.status IN ('OPEN','CLOSED')
-         AND NOT EXISTS (SELECT 1 FROM table_members tm WHERE tm.application_id=a.id AND tm.status='ACTIVE')`,
-    );
-    const optionRows = await client.query<any>('SELECT application_id,event_id FROM application_options', [], 'SELECT application_id,event_id FROM application_options');
-    const eventState = await client.query<any>("SELECT id,status,application_deadline,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events WHERE status IN ('OPEN','CLOSED')", [], "SELECT id,status,application_deadline,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events WHERE status IN ('OPEN','CLOSED')");
-    const eligibleEvents = new Set<string>(eventState.rows.filter((e: any) => e.status === 'CLOSED' || new Date(e.application_deadline).getTime() <= Date.now()).map((e: any) => e.id));
-    const eventIds = new Map<string,string[]>();
-    for (const option of optionRows.rows) if (eligibleEvents.has(option.event_id)) eventIds.set(option.application_id, [...(eventIds.get(option.application_id) ?? []), option.event_id]);
-    // Expand only the connected consented event/application component, not every applicant in the database.
-    const component = new Set<string>([eventId]); let changed = true;
-    while (changed) { changed = false; for (const ids of eventIds.values()) if (ids.some((id) => component.has(id))) for (const id of ids) if (!component.has(id)) { component.add(id); changed = true; } }
-    const relationships = await client.query<any>("SELECT source_user_id,target_user_id FROM match_relationships WHERE active AND relationship_type IN ('BLOCK','DISLIKE','REPORT')");
-    const blocked = new Set(relationships.rows.map((r) => `${r.source_user_id}:${r.target_user_id}`));
-    const base = rows.rows.map((r) => ({ ...r, interests: parse<string[]>(r.interests, []), traits: parse<string[]>(r.traits, []), desiredTraits: parse<string[]>(r.desired_traits, []) }));
-    const candidateRows = base.filter((r) => (eventIds.get(r.application_id) ?? []).some((id) => component.has(id)));
-    const history = await client.query<any>('SELECT user_id,other_user_id FROM match_history');
-    const prior = new Map<string,string[]>();
-    for (const h of history.rows) prior.set(h.user_id, [...(prior.get(h.user_id) ?? []), h.other_user_id]);
-    const blockedBy = new Map<string,string[]>();
-    for (const r of relationships.rows) blockedBy.set(r.source_user_id, [...(blockedBy.get(r.source_user_id) ?? []), r.target_user_id]);
-    const times=Object.fromEntries(eventState.rows.map((e:any)=>[e.id,{startsAt:e.starts_at,endsAt:e.ends_at}]));
-    const candidates: MatchCandidate[] = candidateRows.map((r) => ({ applicationId:r.application_id,userId:r.user_id,birthYear:Number(r.birth_year),gender:r.gender,mbti:r.mbti,interests:parse<string[]>(r.interests, []),traits:parse<string[]>(r.traits, []),desiredTraits:parse<string[]>(r.desired_traits, []), eventIds:eventIds.get(r.application_id) ?? [eventId],eventTimes:times,paid:r.payment_status==='PAID', valid:true, priorUserIds:prior.get(r.user_id), blockedUserIds:blockedBy.get(r.user_id) }));
-    const rules = await client.query<any>(`SELECT version,min_score,weights FROM matching_rules WHERE id=1`, [], `SELECT version,min_score,weights FROM matching_rules WHERE id=1`).catch(() => ({ rows: [], rowCount: 0 }));
-    const rule = rules.rows[0];
-    const weights = parse<MatchWeights>(rule?.weights, { gender: 0.4, mbti: 0.25, interests: 0.2, traits: 0.1, novelty: 0.05 });
-    const minScore = Number(rule?.min_score ?? process.env.MATCH_MIN_SCORE ?? 0);
-    const result = buildDeterministicGroups(candidates, seed, minScore, weights);
-
-    const accepted: typeof result.groups = []; const rejected: MatchCandidate[] = [];
-    const occupiedByEvent = new Map<string, number>();
-    for (const group of result.groups) {
-      const groupEventId = group.eventId ?? eventId;
-      const capacity = await client.query<any>('SELECT capacity FROM events WHERE id=$1', [groupEventId]);
-      const occupied = await client.query<any>("SELECT count(*)::int count FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND tm.status='ACTIVE'", [groupEventId], "SELECT count(*) count FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND tm.status='ACTIVE'");
-      const current = Math.max(Number(occupied.rows[0]?.count ?? 0), occupiedByEvent.get(groupEventId) ?? 0);
-      if (!capacity.rowCount || current + group.members.length > Number(capacity.rows[0].capacity)) { rejected.push(...group.members); continue; }
-      occupiedByEvent.set(groupEventId, current + group.members.length); accepted.push(group);
+    const input=await matchingInput(client,eventId);
+    const policy=await effectivePolicy(client,eventId);
+    const candidates=input.candidates;
+    const plan=matchingPlan(input);
+    const accepted=plan.groups,actualUnmatched=plan.unmatched;
+    const actualMatched=accepted.reduce((n,g)=>n+g.members.length,0);
+    const runs=new Map<string,string>();
+    // Each event freezes its own policy even when applications connect several events.
+    for(const target of input.events){
+      const targetGroups=accepted.filter(g=>g.eventId===target.id);
+      if(target.id!==eventId&&!targetGroups.length)continue;
+      const targetPolicy=input.policies[target.id],id=randomUUID();runs.set(target.id,id);
+      const snapshot=json({eventId:target.id,policy:targetPolicy,inputHash:input.hash,isDemo:Boolean(target.is_demo),result:target.id===eventId?{matchedCount:actualMatched,qualityScore:Number(accepted.reduce((n,g)=>n+g.score,0).toFixed(6)),unmatched:actualUnmatched.map(m=>m.applicationId),groups:accepted.map(g=>g.members.map(m=>m.applicationId))}:undefined,candidates:candidates.map(c=>({...c,blockedUserIds:undefined})),constraints:{groupMin:4,groupMax:6,maxAgeSpan:8}});
+      await client.query(`INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$3,$4,${pgJson('$5')},'COMPLETED',$6,$7,now())`,[id,target.id,targetPolicy.id,`event:${target.id}`,snapshot,targetGroups.reduce((n,g)=>n+g.members.length,0),targetGroups.reduce((n,g)=>n+g.score,0)]);
     }
-    const actualMatched = accepted.reduce((n, g) => n + g.members.length, 0);
-    const actualUnmatched = [...result.unmatched, ...rejected];
-    const runId = randomUUID();
-    const snapshot = json({ eventId, seed, candidates:candidates.map((c) => ({ ...c, blockedUserIds:undefined })), ruleVersion:rule?.version ?? 'core-v1', minScore, constraints:{groupMin:4,groupMax:6,maxAgeSpan:8} });
-    await client.query(`INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$3,$4,${pgJson('$5')},'COMPLETED',$6,$7,now())`, [runId,eventId,rule?.version ?? 'core-v1',seed,snapshot,actualMatched,accepted.reduce((n, g) => n + g.score, 0)], `INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$3,$4,$5,'COMPLETED',$6,$7,CURRENT_TIMESTAMP)`);
+    const runId=runs.get(eventId)!;
     for (const group of accepted) {
       const groupEventId = group.eventId ?? eventId;
+      const groupRunId=runs.get(groupEventId)!;
       const tableId = randomUUID();
       const nextNumber = await client.query<any>('SELECT COALESCE(MAX(table_number),0)+1 table_number FROM dining_tables WHERE event_id=$1', [groupEventId], 'SELECT COALESCE(MAX(table_number),0)+1 table_number FROM dining_tables WHERE event_id=$1');
-      await client.query('INSERT INTO dining_tables(id,event_id,match_run_id,table_number,status,provision_status,quality_score) VALUES($1,$2,$3,$4,\'CONFIRMED\',\'PENDING\',$5)', [tableId,groupEventId,runId,Number(nextNumber.rows[0].table_number),group.score], 'INSERT INTO dining_tables(id,event_id,match_run_id,table_number,status,quality_score) VALUES($1,$2,$3,$4,\'CONFIRMED\',$5)');
+      await client.query('INSERT INTO dining_tables(id,event_id,match_run_id,table_number,status,provision_status,quality_score) VALUES($1,$2,$3,$4,\'CONFIRMED\',\'PENDING\',$5)', [tableId,groupEventId,groupRunId,Number(nextNumber.rows[0].table_number),group.score], 'INSERT INTO dining_tables(id,event_id,match_run_id,table_number,status,quality_score) VALUES($1,$2,$3,$4,\'CONFIRMED\',$5)');
       for (const member of group.members) {
         await client.query('INSERT INTO table_members(table_id,application_id,user_id,status) VALUES($1,$2,$3,\'ACTIVE\')', [tableId,member.applicationId,member.userId]);
         await client.query(`UPDATE applications SET matching_status='CONFIRMED',updated_at=now() WHERE id=$1`, [member.applicationId], `UPDATE applications SET matching_status='CONFIRMED',updated_at=CURRENT_TIMESTAMP WHERE id=$1`);
-        await client.query(`INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'CONFIRMED',$5,${pgJson('$6')})`, [randomUUID(),runId,member.applicationId,tableId,group.explanation,json({ score:group.score, visible:'privacy-safe' })], `INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'CONFIRMED',$5,$6)`);
+        await client.query(`INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'CONFIRMED',$5,${pgJson('$6')})`, [randomUUID(),groupRunId,member.applicationId,tableId,group.explanation,json({ score:group.score, visible:'privacy-safe' })], `INSERT INTO match_explanations(id,match_run_id,application_id,table_id,kind,message,details) VALUES($1,$2,$3,$4,'CONFIRMED',$5,$6)`);
       }
       for (const a of group.members) for (const b of group.members) if (a.userId !== b.userId) await client.query('INSERT INTO match_history(id,table_id,user_id,other_user_id) VALUES($1,$2,$3,$4)', [randomUUID(),tableId,a.userId,b.userId]);
       await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'PROVISION_TABLE',$2,now()) ON CONFLICT(job_key) DO NOTHING`, [`provision:${tableId}`, json({ tableId, eventId: groupEventId })]);

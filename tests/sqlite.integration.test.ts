@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -39,9 +39,10 @@ before(async () => {
 
     ({ db } = await import('../lib/db'));
     await db.query('CREATE TABLE schema_migrations(name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
-    const migration = await readFile(join(process.cwd(), 'db/sqlite/001_foundation.sql'), 'utf8');
-    await db.execScript(migration);
-    await db.query("INSERT INTO schema_migrations(name) VALUES($1)", ['001_foundation.sql']);
+    for (const name of (await readdir(join(process.cwd(), 'db/sqlite'))).filter(name => name.endsWith('.sql')).sort()) {
+      await db.execScript(await readFile(join(process.cwd(), 'db/sqlite', name), 'utf8'));
+      await db.query('INSERT INTO schema_migrations(name) VALUES($1)', [name]);
+    }
     ({ submitApplication } = await import('../lib/application-service'));
     worker = await import('../worker/index');
 

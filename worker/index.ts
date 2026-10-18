@@ -223,7 +223,12 @@ export async function processJob(job: Job, owner: string) {
           await client.query(`UPDATE refund_requests SET status='PROCESSING' WHERE id=$1 AND status='REQUESTED'`, [request.rows[0].id]);
           await client.query(`UPDATE payments SET status='REFUNDED',updated_at=now() WHERE id=$1 AND status IN ('REFUND_REQUESTED','REFUND_PROCESSING')`, [request.rows[0].payment_id]);
           await client.query(`UPDATE refund_requests SET status='COMPLETED',completed_at=now() WHERE id=$1`, [request.rows[0].id]);
-          await client.query(`UPDATE resolution_cases SET status='REFUNDED',updated_at=now() WHERE id=$1 AND status IN ('REFUND_REQUESTED','REFUND_PROCESSING')`, [payload.resolutionId]);
+          await client.query(`UPDATE resolution_cases SET status='REFUNDED',updated_at=now() WHERE id=$1`, [payload.resolutionId]);
+          break;
+        }
+        case 'UPDATE_PREFERENCE_SIGNALS': {
+          const feedbackService = await import('../lib/feedback-service');
+          await feedbackService.updatePreferenceSignals(client);
           break;
         }
         default:
@@ -313,8 +318,19 @@ export async function scheduleDueMatchJobs() {
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
 }
 
+export async function schedulePeriodicPreferenceSignalUpdates() {
+  // A unique six-hour bucket makes concurrent workers and process restarts safe.
+  const bucket = Math.floor(Date.now() / (6 * 3600_000));
+  await db.query(
+    `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at)
+     VALUES($1,'UPDATE_PREFERENCE_SIGNALS',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO NOTHING`,
+    [`pref-signal-update:${bucket}`, JSON.stringify({ bucket })],
+  );
+}
+
 export async function tick(owner = workerId) {
   await scheduleDueMatchJobs();
+  await schedulePeriodicPreferenceSignalUpdates();
   const job = await claimJob(owner);
   if (!job) return;
   try {
