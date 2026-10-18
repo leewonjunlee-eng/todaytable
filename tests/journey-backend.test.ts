@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 let db: typeof import('../lib/db').db;
-let runMatching: typeof import('../lib/lifecycle-service').runMatching;
+let runMatching: typeof import('../lib/lifecycle-service').seedConfirmedMatching;
 let dir: string;
 
 before(async () => {
@@ -14,7 +14,7 @@ before(async () => {
   process.env.DATABASE_PROVIDER = 'sqlite';
   process.env.SQLITE_PATH = join(dir, 'journey.sqlite');
   ({ db } = await import('../lib/db'));
-  ({ runMatching } = await import('../lib/lifecycle-service'));
+  ({ seedConfirmedMatching:runMatching } = await import('../lib/lifecycle-service'));
   for (const name of (await readdir(join(process.cwd(), 'db/sqlite'))).filter(name => name.endsWith('.sql')).sort()) await db.execScript(await readFile(join(process.cwd(), 'db/sqlite', name), 'utf8'));
 });
 after(async () => { await db.end(); await rm(dir, { recursive: true, force: true }); });

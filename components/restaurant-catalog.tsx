@@ -1,0 +1,12 @@
+'use client';
+import {useState} from 'react';
+import {REGIONS} from '@/lib/domain';
+import {JourneyLayout,JourneyState,useJourney} from './journey-ui';
+export function RestaurantCatalog({admin=false}:{admin?:boolean}){
+ const q=useJourney(admin?'/api/admin/venue-catalog':'/api/restaurants'),[area,setArea]=useState<string>(REGIONS[0]);
+ const venues=(q.data?.venues??[]).filter((v:any)=>v.area===area);
+ return <JourneyLayout title={admin?'지역별 식당과 후기':'우리가 만날 공간'} eyebrow={admin?'ADMIN RESTAURANTS':'PLACES FOR CONNECTION'} back={admin?'/admin':'/apply'} focus={!admin} description="음식과 공간, 다녀온 분들의 이야기를 살펴보세요."><JourneyState {...q} onRefresh={q.refresh}>
+ <nav className="restaurant-areas" aria-label="식당 지역">{REGIONS.map(a=><button className="button quiet" key={a} aria-pressed={area===a} onClick={()=>setArea(a)}>{a}</button>)}</nav><p className="muted">{area} · 식당 {venues.length}곳</p>
+ <div className="restaurant-grid">{venues.length?venues.map((v:any)=><article className="panel restaurant-card" key={v.id}><div className="section-title"><span className="tag">{v.cuisine}</span><small>최대 {v.capacity}명</small></div><h2>{v.name}</h2><p>{v.description}</p><p className="muted">{v.address}</p><div className="curation-keywords">{v.interestTags.map((t:string)=><span className="tag" key={t}>{t}</span>)}</div><p>1인 식사 ₩{v.priceMin.toLocaleString()}–{v.priceMax.toLocaleString()}</p><a className="inline-link" target="_blank" rel="noreferrer" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v.address)}`}>지도에서 보기 ↗</a><details className="detail-disclosure"><summary>다녀온 분들의 후기 {v.reviewCount>0?`· ${v.averageScore.toFixed(1)} / 5 · ${v.reviewCount}개`:''}</summary>{v.reviews.length?v.reviews.map((r:any)=><blockquote className="restaurant-review" key={r.id}><strong>{r.score} / 5</strong><p>{r.body}</p><small>식탁 멤버 · {new Date(r.created_at).toLocaleDateString('ko-KR')}</small></blockquote>):<p className="muted">아직 공개된 후기가 없어요. 함께한 저녁 후 식당 이야기를 남겨주세요.</p>}</details>{admin&&v.privateFeedback?.length>0&&<details className="detail-disclosure"><summary>운영팀에게만 남긴 의견 {v.privateFeedback.length}개</summary>{v.privateFeedback.map((r:any)=><blockquote key={r.id}><strong>{r.author_name} · {r.score} / 5</strong><p>{r.body||'별도 메모 없음'}</p></blockquote>)}</details>}</article>):<p className="empty-card">이 지역의 다음 식탁 공간을 준비하고 있어요.</p>}</div>
+ </JourneyState></JourneyLayout>;
+}

@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 
-let db: typeof import('../lib/db').db; let runMatching: typeof import('../lib/lifecycle-service').runMatching; let repairTable: typeof import('../lib/lifecycle-service').repairTable; let dir: string; let fixtureEvent=''; let fixtureApps:string[]=[];
+let db: typeof import('../lib/db').db; let runMatching: typeof import('../lib/lifecycle-service').seedConfirmedMatching; let repairTable: typeof import('../lib/lifecycle-service').repairTable; let dir: string; let fixtureEvent=''; let fixtureApps:string[]=[];
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), 'todaytable-core-')); process.env.DATABASE_PROVIDER='sqlite'; process.env.SQLITE_PATH=join(dir,'core.sqlite');
-  ({ db } = await import('../lib/db')); ({ runMatching, repairTable } = await import('../lib/lifecycle-service'));
+  ({ db } = await import('../lib/db')); ({ seedConfirmedMatching:runMatching, repairTable } = await import('../lib/lifecycle-service'));
   for (const name of (await readdir(join(process.cwd(), 'db/sqlite'))).filter(name => name.endsWith('.sql')).sort()) await db.execScript(await readFile(join(process.cwd(),'db/sqlite',name),'utf8'));
 });
 after(async () => { await db.end(); await rm(dir,{recursive:true,force:true}); });
@@ -57,7 +57,7 @@ test('repairTable fills a three-person table with a paid, consented eligible app
   await db.query(`INSERT INTO payments(application_id,idempotency_key,amount_cents,status) VALUES($1,$2,8000,'PAID')`,[app,`repair-${app}`]);
   await db.query('INSERT INTO application_options(application_id,event_id) VALUES($1,$2)',[app,fixtureEvent]);
   await db.query('INSERT INTO application_options(application_id,event_id) VALUES($1,$2)',[app,alternate]);
-  const result=await repairTable(table,fixtureEvent);
+  const result=await repairTable(table,fixtureEvent,undefined,false);
   assert.equal(result.status,'REPAIRED');
   assert.equal((await db.query<any>('SELECT event_id FROM dining_tables WHERE id=$1',[table])).rows[0].event_id,alternate);
   assert.equal(Number((await db.query<any>("SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'",[table])).rows[0].count),4);
@@ -77,7 +77,7 @@ test('repairTable records an admin exception when the compatible cohort stays be
   const removed=(await db.query<any>("SELECT application_id FROM table_members WHERE table_id=$1 AND status='ACTIVE' ORDER BY user_id LIMIT 1",[table])).rows[0].application_id;
   await db.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND application_id=$2",[table,removed]);
   await db.query("UPDATE applications SET status='CANCELED',matching_status='NO_MATCH' WHERE id=$1",[removed]);
-  const result=await repairTable(table,fixtureEvent);
+  const result=await repairTable(table,fixtureEvent,undefined,false);
   assert.equal(result.status,'EXCEPTION');
   assert.equal(Number((await db.query<any>("SELECT count(*) count FROM lifecycle_exceptions WHERE source='repair_table' AND entity_id=$1",[table])).rows[0].count),1);
 });
@@ -87,7 +87,7 @@ test('repairTable refuses past events and canceled alternatives even when enough
   await db.query("UPDATE dining_tables SET status='EXCEPTION' WHERE id=$1", [table.id]);
   await db.query("UPDATE events SET starts_at=datetime('now','-1 day'),status='CLOSED' WHERE id=$1", [table.event_id]);
   await db.query("UPDATE events SET status='CANCELLED',capacity=30 WHERE id=$1", [fixtureEvent]);
-  const result = await repairTable(table.id, fixtureEvent);
+  const result = await repairTable(table.id, fixtureEvent,undefined,false);
   assert.equal(result.status, 'EXCEPTION');
   assert.equal((await db.query<any>('SELECT event_id FROM dining_tables WHERE id=$1', [table.id])).rows[0].event_id, table.event_id);
 });

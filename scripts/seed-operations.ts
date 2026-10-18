@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { databaseProvider, db } from '../lib/db';
-import { runMatching, provisionTable } from '../lib/lifecycle-service';
+import { seedConfirmedMatching as runMatching, provisionTable } from '../lib/lifecycle-service';
 import { hashPassword } from '../lib/security';
 import { INTERESTS, TRAITS, DESIRED_TRAITS, REGIONS } from '../lib/domain';
 

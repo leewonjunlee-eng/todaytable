@@ -1,4 +1,4 @@
-import { databaseProvider, db } from './db';
+import { databaseProvider, db, type QueryClient } from './db';
 import { isCanonicalUuid, validateApplicationSelection } from './domain';
 
 type Submission = { eventIds: unknown; pass: unknown; requestKey: unknown };
@@ -12,15 +12,16 @@ function twoMonthExpiry(from: Date) {
   ));
 }
 
-export async function submitApplication(userId: string, body: Submission) {
+export async function submitApplication(userId: string, body: Submission, connection?: QueryClient) {
   const selected = validateApplicationSelection(body.eventIds, body.pass);
   if (!isCanonicalUuid(body.requestKey)) {
     throw new Error('요청 키가 유효하지 않습니다.');
   }
 
-  const client = await db.connect();
+  const client = connection ?? await db.connect();
+  const own = !connection;
   try {
-    await client.query('BEGIN');
+    if (own) await client.query('BEGIN');
     if (databaseProvider === 'postgres') {
       // Same stable lock as matching and resolution; serialize lifecycle decisions.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended('todaytable:lifecycle',0))");
@@ -47,7 +48,7 @@ export async function submitApplication(userId: string, body: Submission) {
       if (replay.rows[0].pass_choice !== selected.pass || !sameEvents) {
         throw new Error('이미 처리된 신청 요청입니다.');
       }
-      await client.query('COMMIT');
+      if (own) await client.query('COMMIT');
       return {
         id: replay.rows[0].id,
         payment: replay.rows[0].payment_status,
@@ -170,12 +171,12 @@ export async function submitApplication(userId: string, body: Submission) {
        VALUES($1,'APPLICATION_SUBMITTED','application',$2,$3::jsonb)`,
       [userId, applicationId, JSON.stringify({ eventIds: selected.eventIds, pass: selected.pass, amount: selected.amount })],
     );
-    await client.query('COMMIT');
+    if (own) await client.query('COMMIT');
     return { id: applicationId, payment: 'PAID', amount: selected.amount, created: true };
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (own) await client.query('ROLLBACK');
     throw error;
   } finally {
-    client.release();
+    if (own) client.release();
   }
 }

@@ -1,3 +1,4 @@
+import {retireApplicationProposals} from '@/lib/matching-review';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { apiUser } from '@/lib/auth';
@@ -27,6 +28,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (hours < 0) throw Object.assign(new Error('행사 시작 후에는 취소할 수 없습니다.'), { status: 400 });
     const cancellationStatus = hours >= 48 ? 'CANCELED_EARLY' : 'CANCELED_LATE';
     await client.query(`UPDATE applications SET status='CANCELED',matching_status='NO_MATCH',updated_at=now() WHERE id=$1`, [id]);
+    await retireApplicationProposals(client,id,'멤버의 참가 등록이 취소되어 다시 추천합니다.');
+    await client.query("UPDATE availability_registrations SET status='CANCELLED' WHERE application_id=$1",[id]);
     await client.query(`UPDATE table_members SET status='REMOVED' WHERE application_id=$1 AND status='ACTIVE'`, [id]);
     if (row.table_id) {
       const remaining = await client.query<any>(`SELECT count(*)::int count FROM table_members WHERE table_id=$1 AND status='ACTIVE'`, [row.table_id], `SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'`);

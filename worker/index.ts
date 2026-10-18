@@ -103,10 +103,7 @@ export async function processJob(job: Job, owner: string) {
         await client.query("UPDATE scheduled_jobs SET status='DONE',completed_at=now(),lease_owner=NULL,lease_until=NULL WHERE id=$1", [job.id]);
         await client.query('COMMIT'); return;
       }
-      if (new Date(gate.rows[0].application_deadline).getTime() > Date.now()) {
-        await client.query(`UPDATE scheduled_jobs SET status='PENDING',run_at=$2,next_attempt_at=$2,lease_owner=NULL,lease_until=NULL WHERE id=$1`, [job.id, gate.rows[0].application_deadline], `UPDATE scheduled_jobs SET status='PENDING',run_at=$2,next_attempt_at=$2,lease_owner=NULL,lease_until=NULL WHERE id=$1`);
-        await client.query('COMMIT'); return;
-      }
+
     }
 
     const isPushJob = jobType === 'PUSH_NOTIFICATION';

@@ -6,8 +6,8 @@ import { isCanonicalUuid } from './domain';
 import {SUPPORT_CATEGORIES,SUPPORT_STATUSES} from './support-domain';
 export type SupportIdentity = {user:AuthUser|null; operator:Operator|null; visitorId:string|null; actorKey:string; cookieToken?:string};
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
-export async function supportIdentity(request:Request,create=false):Promise<SupportIdentity> {
- const user=await apiUser(request),operator=user?.role==='ADMIN'?await requestOperator(request):null;
+export async function supportIdentity(request:Request,create=false,operatorView=true):Promise<SupportIdentity> {
+ const user=await apiUser(request),operator=operatorView&&user?.role==='ADMIN'?await requestOperator(request):null;
  const cookie=request.headers.get('cookie')?.match(/(?:^|;\s*)todaytable_support=([^;]+)/)?.[1];
  let visitorId:string|null=null, cookieToken:string|undefined;
  if(cookie) visitorId=(await db.query<any>('SELECT id FROM support_visitors WHERE token_hash=$1',[digest(cookie)])).rows[0]?.id??null;
@@ -21,7 +21,7 @@ export async function limitSupport(request:Request) {
  const hit=await db.query<any>('INSERT INTO support_rate_limits(bucket,hits,reset_at) VALUES($1,1,$2) ON CONFLICT(bucket) DO UPDATE SET hits=support_rate_limits.hits+1 RETURNING hits',[bucket,new Date(Date.now()+3600000)]);
  if(Number(hit.rows[0].hits)>30)problem('문의 요청이 많아요. 잠시 후 다시 시도해 주세요.',429);
 }
-const own=(row:any,who:SupportIdentity)=>Boolean(who.operator||(who.user&&row.user_id===who.user.id)||(who.visitorId&&row.visitor_id===who.visitorId));
+const own=(row:any,who:SupportIdentity)=>Boolean(who.operator||(who.user&&row.user_id===who.user.id)||(!who.user&&who.visitorId&&row.visitor_id===who.visitorId));
 export async function getTicket(id:string,who:SupportIdentity,client:Pick<QueryClient,'query'>=db,lock=false) {
  if(!isCanonicalUuid(id))problem('문의를 찾을 수 없습니다.',404);
  const row=(await client.query<any>(`SELECT * FROM support_tickets WHERE id=$1${lock?' FOR UPDATE':''}`,[id])).rows[0];
@@ -35,7 +35,7 @@ export async function listSupport(who:SupportIdentity) {
  if(who.actorKey==='anonymous')return {tickets:[],operators:[],templates:[],improvements:[],authenticated:false};
  const params:unknown[]=[who.actorKey];
  let scope='';
- if(!who.operator){params.push(who.user?.id??null,who.visitorId);scope='WHERE (t.user_id=$2 OR t.visitor_id=$3)';}
+ if(!who.operator){params.push(who.user?.id??who.visitorId);scope=who.user?'WHERE t.user_id=$2':'WHERE t.user_id IS NULL AND t.visitor_id=$2';}
  const tickets=await db.query<any>(`SELECT t.*,op.display_name assignee_name,
    CASE WHEN sr.read_at IS NULL OR sr.read_at<t.last_public_at THEN 1 ELSE 0 END unread,
    (SELECT body FROM support_messages m WHERE m.ticket_id=t.id AND m.kind='PUBLIC' ORDER BY m.ordinal DESC,m.created_at DESC,m.id DESC LIMIT 1) preview
@@ -44,7 +44,7 @@ export async function listSupport(who:SupportIdentity) {
  const operators=who.operator?(await db.query('SELECT user_id,display_name,team_role,avatar_color FROM operator_profiles WHERE active=true ORDER BY created_at')).rows:[];
  const templates=who.operator?(await db.query('SELECT * FROM support_templates ORDER BY title')).rows:[];
  const improvements=who.operator?(await db.query(`SELECT i.*, (SELECT count(*) FROM improvement_tickets it WHERE it.item_id=i.id) request_count FROM improvement_items i ORDER BY i.created_at DESC`)).rows:[];
- return {authenticated:Boolean(who.user),tickets:tickets.rows.map(t=>({...t,tags:parseJson(t.tags,[]),...(!who.operator?{contact_email:undefined,visitor_id:undefined}:{} )})),operators,templates,improvements,me:who.operator?{id:who.operator.id,name:who.operator.display_name,role:who.operator.team_role}:null};
+ return {authenticated:Boolean(who.user),tickets:tickets.rows.map(t=>({...t,tags:parseJson(t.tags,[]),...(!who.operator?{contact_email:undefined,visitor_id:undefined,assignee_id:undefined,assignee_name:undefined}:{} )})),operators,templates,improvements,me:who.operator?{id:who.operator.id,name:who.operator.display_name,role:who.operator.team_role}:null};
 }
 export async function createTicket(who:SupportIdentity,b:any) {
  if(!who.user&&!who.visitorId)problem('접수 정보를 확인해 주세요.');
@@ -74,7 +74,7 @@ export async function createTicket(who:SupportIdentity,b:any) {
 }
 export async function supportDetail(id:string,who:SupportIdentity) {
  const ticket=await getTicket(id,who);
- const messages=(await db.query<any>(`SELECT id,author_name,author_user_id,kind,body,created_at FROM support_messages WHERE ticket_id=$1 ${who.operator?'':"AND kind='PUBLIC'"} ORDER BY ordinal,created_at,id`,[id])).rows;
+ const messages=(await db.query<any>(`SELECT m.id,m.author_name,m.author_user_id,m.kind,m.body,m.created_at,CASE WHEN u.role='ADMIN' THEN 'OPERATOR' ELSE 'PARTICIPANT' END author_role,o.avatar_color author_color FROM support_messages m LEFT JOIN users u ON u.id=m.author_user_id LEFT JOIN operator_profiles o ON o.user_id=m.author_user_id WHERE m.ticket_id=$1 ${who.operator?'':"AND m.kind='PUBLIC'"} ORDER BY m.ordinal,m.created_at,m.id`,[id])).rows.map(m=>!who.operator&&m.author_role==='OPERATOR'?{...m,author_name:'운영자',author_user_id:null,author_color:'#3e5a4a'}:m);
  const timeline=who.operator?(await db.query<any>('SELECT * FROM support_activity WHERE ticket_id=$1 ORDER BY created_at,id',[id])).rows.map(a=>({...a,details:parseJson(a.details,{})})):[];
  const presence=who.operator?(await db.query(`SELECT p.user_id,p.composing,o.display_name,o.avatar_color FROM support_presence p JOIN operator_profiles o ON o.user_id=p.user_id WHERE p.ticket_id=$1 AND p.expires_at>now() AND o.active=true`,[id])).rows:[];
  const context=who.operator&&ticket.user_id?{
@@ -83,8 +83,8 @@ export async function supportDetail(id:string,who:SupportIdentity) {
   tables:(await db.query(`SELECT t.id,e.title,e.starts_at,e.area,v.name venue_name FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id JOIN events e ON e.id=t.event_id LEFT JOIN venues v ON v.id=t.venue_id WHERE tm.user_id=$1 AND tm.status='ACTIVE' ORDER BY e.starts_at DESC LIMIT 10`,[ticket.user_id])).rows,
  }:null;
  const linkedImprovements=who.operator?(await db.query('SELECT i.id,i.title,i.status FROM improvement_items i JOIN improvement_tickets it ON it.item_id=i.id WHERE it.ticket_id=$1',[id])).rows:[];
- if(!who.operator){delete ticket.visitor_id;delete ticket.contact_email;}
- return {ticket:{...ticket,tags:parseJson(ticket.tags,[])},messages,timeline,presence,context,improvements:linkedImprovements};
+ if(!who.operator){delete ticket.visitor_id;delete ticket.contact_email;delete ticket.assignee_id;}
+ return {currentUserId:who.user?.id??null,ticket:{...ticket,tags:parseJson(ticket.tags,[])},messages,timeline,presence,context,improvements:linkedImprovements};
 }
 export async function mutateSupport(id:string,who:SupportIdentity,b:any) {
  const client=await db.connect();try{

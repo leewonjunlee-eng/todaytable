@@ -1,5 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
+import {useRouter} from 'next/navigation';
+import {MBTI_TYPES} from '@/lib/profile-validation';
 import { DESIRED_TRAITS, FOOD_BUDGETS, INTERESTS, TRAITS } from '@/lib/domain';
 
 type Profile = {
@@ -42,6 +44,8 @@ function Checks({
 }
 
 export function ProfileForm() {
+  const router=useRouter();
+  const [fieldErrors,setFieldErrors]=useState<Record<string,string>>({});
   const [profile, setProfile] = useState<Profile>(blank);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -59,7 +63,7 @@ export function ProfileForm() {
         if (!active || !data) return;
         setProfile({
           ...blank, name: data.display_name, phone: data.contact_phone,
-          birthYear: String(data.birth_year), gender: data.gender, occupation: data.occupation,
+          birthYear: String(data.birth_year), gender: data.gender==='NON_BINARY'?'PREFER_NOT_TO_SAY':data.gender, occupation: data.occupation,
           mbti: data.mbti, interests: data.interests ?? [], traits: data.traits ?? [],
           desiredTraits: data.desired_traits ?? [], foodBudgets: data.food_budgets ?? [],
           dietaryNotes: data.dietary_notes ?? '', privacy: data.consent_privacy,
@@ -80,14 +84,14 @@ export function ProfileForm() {
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
-    setMessage('');
+    setMessage('');setFieldErrors({});
     try {
       const response = await fetch('/api/profile', {
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ...profile, birthYear: Number(profile.birthYear) }),
       });
       const result = await response.json();
-      setMessage(response.ok ? '프로필을 저장했어요.' : result.error);
+      if(response.ok){router.push('/apply');router.refresh();}else{setFieldErrors(result.fields??{});setMessage(result.error??'저장 내용을 확인해 주세요.');}
     } catch {
       setMessage('서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
@@ -103,12 +107,12 @@ export function ProfileForm() {
     <form className="form-stack profile-form" onSubmit={save}>
       {loadError && <p className="form-error">{loadError}</p>}
       <div className="form-grid">
-        <label>이름<input required maxLength={80} value={profile.name} onChange={(e) => update('name', e.target.value)} /></label>
-        <label>연락처<input required type="tel" placeholder="010-1234-5678" value={profile.phone} onChange={(e) => update('phone', e.target.value)} /></label>
-        <label>출생연도<input required type="number" min="1920" max={maxBirthYear} value={profile.birthYear} onChange={(e) => update('birthYear', e.target.value)} /></label>
-        <label>성별<select value={profile.gender} onChange={(e) => update('gender', e.target.value)}><option value="PREFER_NOT_TO_SAY">선택 안 함</option><option value="WOMAN">여성</option><option value="MAN">남성</option><option value="NON_BINARY">논바이너리</option></select></label>
-        <label>직업<input required maxLength={120} value={profile.occupation} onChange={(e) => update('occupation', e.target.value)} /></label>
-        <label>MBTI<input required placeholder="예: INFP" maxLength={4} value={profile.mbti} onChange={(e) => update('mbti', e.target.value.toUpperCase())} /></label>
+        <label>이름 (필수)<input required maxLength={80} value={profile.name} onChange={(e) => update('name', e.target.value)} /></label>
+        <label>연락처 (필수)<input required type="tel" placeholder="010-1234-5678" value={profile.phone} onChange={(e) => update('phone', e.target.value)} /></label>
+        <label>출생연도 (필수)<input required type="number" min="1920" max={maxBirthYear} value={profile.birthYear} onChange={(e) => update('birthYear', e.target.value)} /></label>
+        <label>성별<select value={profile.gender} onChange={(e) => update('gender', e.target.value)}><option value="PREFER_NOT_TO_SAY">선택 안 함</option><option value="WOMAN">여성</option><option value="MAN">남성</option></select></label>
+        <label>직업 (선택)<input maxLength={120} value={profile.occupation} onChange={(e) => update('occupation', e.target.value)} /></label>
+        <label>MBTI (필수)<select required value={profile.mbti} onChange={e=>update('mbti',e.target.value)}><option value="">유형 선택</option>{MBTI_TYPES.map(t=><option value={t} key={t}>{t}</option>)}</select></label>
       </div>
       <fieldset>
         <legend>식사 예산 (복수 선택)</legend>
@@ -125,18 +129,19 @@ export function ProfileForm() {
           ))}
         </div>
       </fieldset>
-      <Checks title="요즘 관심사" values={INTERESTS} selected={profile.interests} onChange={(values) => update('interests', values)} />
-      <Checks title="나의 성향" values={TRAITS} selected={profile.traits} onChange={(values) => update('traits', values)} />
-      <Checks title="만나고 싶은 사람" values={DESIRED_TRAITS} selected={profile.desiredTraits} onChange={(values) => update('desiredTraits', values)} />
+      <Checks title="요즘 관심사 (필수 · 1개 이상)" values={INTERESTS} selected={profile.interests} onChange={(values) => update('interests', values)} />
+      <Checks title="나의 성향 (선택)" values={TRAITS} selected={profile.traits} onChange={(values) => update('traits', values)} />
+      <Checks title="만나고 싶은 사람 (선택)" values={DESIRED_TRAITS} selected={profile.desiredTraits} onChange={(values) => update('desiredTraits', values)} />
       <label>못 먹는 음식이나 알레르기<textarea maxLength={1000} placeholder="없다면 비워두세요" value={profile.dietaryNotes} onChange={(e) => update('dietaryNotes', e.target.value)} /></label>
       <div className="consents">
-        <label><input type="checkbox" checked={profile.privacy} onChange={(e) => update('privacy', e.target.checked)} /> 개인정보 수집 및 이용에 동의합니다. <em>(필수)</em></label>
-        <label><input type="checkbox" checked={profile.operations} onChange={(e) => update('operations', e.target.checked)} /> 행사 운영 및 안내를 위한 이용에 동의합니다. <em>(필수)</em></label>
+        <label><input type="checkbox" required checked={profile.privacy} onChange={(e) => update('privacy', e.target.checked)} /> 개인정보 수집 및 이용에 동의합니다. <em>(필수)</em></label>
+        <label><input type="checkbox" required checked={profile.operations} onChange={(e) => update('operations', e.target.checked)} /> 행사 운영 및 안내를 위한 이용에 동의합니다. <em>(필수)</em></label>
         <small>프로필 정보는 저녁 모임을 준비하고 참가자에게 필요한 안내를 제공하는 데 사용합니다.</small>
       </div>
+      {Object.keys(fieldErrors).length>0&&<ul className="form-error" role="alert">{Object.entries(fieldErrors).map(([key,value])=><li key={key}>{value}</li>)}</ul>}
       {message && <p className={message.includes('저장') ? 'success' : 'form-error'}>{message}</p>}
       <button className="button primary" disabled={busy || loading || !!loadError}>
-        {loading ? '프로필 불러오는 중…' : busy ? '저장 중…' : '프로필 저장'} <span>→</span>
+        {loading ? '프로필 불러오는 중…' : busy ? '저장 중…' : '저장하고 가능한 날 고르기'} <span>→</span>
       </button>
     </form>
   );

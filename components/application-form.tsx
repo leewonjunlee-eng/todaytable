@@ -1,107 +1,17 @@
 'use client';
-import { useEffect, useState } from 'react';
+import {useState,type FormEvent} from 'react';
 import Link from 'next/link';
-
-type EventOption = {
-  id: string; title: string; starts_at: string; application_deadline: string;
-  is_demo:boolean; area: string; capacity: number; price_cents: number;
-};
-const passes = [
-  { id: 'SINGLE', title: '1회권', price: '₩8,000', note: '한 번의 저녁' },
-  { id: 'THREE_PASS', title: '3회권', price: '₩15,000', note: '2개월 이내 3회' },
-  { id: 'EXISTING_PASS', title: '보유 이용권', price: '₩0', note: '기존 3회권 사용' },
-];
-
-export function ApplicationForm({initialEventId=''}:{initialEventId?:string}) {
-  const [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
-  const [events, setEvents] = useState<EventOption[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [pass, setPass] = useState('SINGLE');
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [step,setStep]=useState(1),[savedId,setSavedId]=useState('');
-
-  useEffect(() => {
-    let active = true;
-    fetch('/api/events')
-      .then(async (response) => {
-        if (!response.ok) throw new Error('일정을 불러오지 못했습니다. 새로고침해 주세요.');
-        return response.json();
-      })
-      .then((rows: EventOption[]) => { if (active && Array.isArray(rows)) {setEvents(rows);if(rows.some(r=>r.id===initialEventId))setSelectedIds([initialEventId]);} })
-      .catch((reason: unknown) => {
-        if (active) setLoadError(reason instanceof Error ? reason.message : '일정을 불러오지 못했습니다.');
-      })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [initialEventId]);
-
-  function toggleEvent(id: string, checked: boolean) {
-    setSelectedIds((current) => checked ? [...current, id] : current.filter((value) => value !== id));
-  }
-
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if(step===1){if(selectedIds.length)setStep(2);return;}
-    setError('');
-    setSuccess('');
-    setBusy(true);
-    try {
-      const response = await fetch('/api/applications', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ eventIds: selectedIds, pass, requestKey }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        setError(result.error ?? '신청을 저장하지 못했습니다.');
-        return;
-      }
-      setSuccess(`신청이 저장되었어요 · 결제 ₩${Number(result.amount).toLocaleString()} · 번호 ${String(result.id).slice(0, 8)}`);
-      setSavedId(result.id);
-      setRequestKey(crypto.randomUUID());
-      setSelectedIds([]);
-    } catch {
-      setError('서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if(success)return <section className="application-success"><span className="success-seal">✓</span><h2>다음 저녁을 기다려 주세요</h2><p className="success">{success}</p><p>공통 일정과 취향을 살펴 식탁을 준비할게요.<br/>확정되면 내 식탁에서 안내를 확인해 주세요.</p><Link className="button primary full" href={`/applications/${savedId}`}>나의 신청 확인하기</Link></section>;
-  return (
-    <form className="form-stack" onSubmit={submit}>
-      <nav className="application-progress" aria-label="신청 단계"><button type="button" aria-current={step===1?'step':undefined} onClick={()=>setStep(1)}>1. 일정 선택</button><span>→</span><button type="button" aria-current={step===2?'step':undefined} disabled={!selectedIds.length} onClick={()=>setStep(2)}>2. 참가권 확인</button></nav>
-      {step===1&&<><div className="section-heading"><span className="step-number">01</span><div><h2>참석할 수 있는 저녁</h2><p>일정을 여러 개 선택하면 가능한 날을 함께 알려드려요.</p></div></div>
-      {loadError && <p className="form-error">{loadError}</p>}
-      {loading ? <div className="empty-card">일정을 불러오는 중…</div> : events.length === 0
-        ? <div className="empty-card">현재 신청 가능한 저녁이 없어요.</div>
-        : <div className="event-grid">{events.map((option) => (
-          <label className={`event-option ${selectedIds.includes(option.id) ? 'selected' : ''}`} key={option.id}>
-            <input type="checkbox" checked={selectedIds.includes(option.id)} onChange={(event) => toggleEvent(option.id, event.target.checked)} />
-            <span className="event-area">{option.area}</span>
-            <strong>{new Date(option.starts_at).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', timeZone: 'Asia/Seoul' })}</strong>
-            <small>{new Date(option.starts_at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' })} · 최대 {option.capacity}명</small>
-          </label>
-        ))}</div>}
-      <button className="button primary full" type="button" disabled={!selectedIds.length} onClick={()=>{setError('');setStep(2);}}>다음 · 참가권 선택 <span>→</span></button></>}
-      {step===2&&<><div className="selection-summary"><span>선택한 일정 {selectedIds.length}개</span><button type="button" className="text-button" onClick={()=>setStep(1)}>변경</button></div><div className="section-heading top-gap"><span className="step-number">02</span><div><h2>참가권 선택</h2><p>식사 비용은 현장에서 각자 계산해요.</p></div></div>
-      <div className="pass-grid">{passes.map((option) => (
-        <label className={`pass-option ${pass === option.id ? 'selected' : ''}`} key={option.id}>
-          <input type="radio" name="pass" checked={pass === option.id} onChange={() => setPass(option.id)} />
-          <span>{option.title}</span><strong>{option.price}</strong><small>{option.note}</small>
-        </label>
-      ))}</div>
-      <div className="notice"><strong>참가 전 확인해 주세요</strong><p>참가권은 만남 준비를 위한 이용권입니다. 식사 비용은 현장에서 각자 부담해요. 일정 변경과 취소는 신청 내역에서 확인할 수 있어요.</p></div>
-      </>}
-      {error && <p className="form-error">{error}</p>}
-      {success && <p className="success">{success}</p>}
-      {step===2&&<button className="button primary" disabled={busy || loading || !!loadError || events.length === 0}>
-        {busy ? '신청 저장 중…' : '참가 신청 완료하기'} <span>→</span>
-      </button>}
-    </form>
-  );
+import {FormNotice,JourneyState,journeyFetch,useJourney,useRequestKey} from './journey-ui';
+const passes=[{id:'SINGLE',title:'1회 참가권',price:'₩8,000',note:'다음 한 번의 만남'},{id:'THREE_PASS',title:'3회 참가권',price:'₩15,000',note:'2개월 이내 3번의 만남'},{id:'EXISTING_PASS',title:'보유 참가권 사용',price:'₩0',note:'남아 있는 참가권에서 1회 사용'}];
+export function ApplicationForm(){
+ const q=useJourney('/api/availability'),key=useRequestKey();
+ const [dates,setDates]=useState<string[]>([]),[areas,setAreas]=useState<string[]>([]),[pass,setPass]=useState('SINGLE'),[step,setStep]=useState(1),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[saved,setSaved]=useState(false);
+ function toggle(value:string,current:string[],set:(v:string[])=>void,max:number){if(current.includes(value))set(current.filter(v=>v!==value));else if(current.length<max)set([...current,value]);else setNotice(`최대 ${max}개까지 선택할 수 있어요.`);}
+ async function submit(e:FormEvent){e.preventDefault();if(busy)return;if(!dates.length||!areas.length){setNotice('가능한 날과 지역을 하나 이상 선택해 주세요.');return;}if(step===1){setStep(2);setNotice('');return;}setBusy(true);setNotice('');try{await journeyFetch('/api/availability',{method:'POST',body:JSON.stringify({dates,areas,pass,requestKey:key.next()})});key.reset();setSaved(true);}catch(e){setNotice(e instanceof Error?e.message:'가능한 날을 저장하지 못했어요.');}finally{setBusy(false);}}
+ if(saved)return <section className="application-success"><span className="success-seal">✓</span><h2>가능한 날을 기억해 둘게요</h2><p>선택한 날짜와 지역에서 취향이 맞는 식탁을 준비합니다. 운영자가 구성과 식당을 확인하면 알림으로 알려드려요.</p><Link className="button primary full" href="/applications">내 식탁으로</Link></section>;
+ return <JourneyState {...q} onRefresh={q.refresh}><form className="form-stack" onSubmit={submit}>
+ <nav className="application-progress" aria-label="만남 준비 단계"><button type="button" aria-current={step===1?'step':undefined} onClick={()=>setStep(1)}>1. 가능한 날과 지역</button><span>→</span><button type="button" aria-current={step===2?'step':undefined} disabled={!dates.length||!areas.length} onClick={()=>setStep(2)}>2. 참가권</button></nav>
+ {step===1?<><div className="section-heading"><div><h2>어느 날이 편하세요?</h2><p>가능한 날을 최대 8개 골라주세요. 저녁 {q.data?.meetingTime}에 만나요.</p></div></div><div className="availability-calendar">{q.data?.days?.map((day:string)=>{const date=new Date(`${day}T19:30:00+09:00`);return <label className={`availability-day ${dates.includes(day)?'selected':''}`} key={day}><input type="checkbox" checked={dates.includes(day)} onChange={()=>toggle(day,dates,setDates,8)}/><small>{date.toLocaleDateString('ko-KR',{month:'numeric',weekday:'short',timeZone:'Asia/Seoul'})}</small><strong>{date.toLocaleDateString('ko-KR',{day:'numeric',timeZone:'Asia/Seoul'})}</strong></label>;})}</div>
+ <h2>어디까지 오실 수 있나요?</h2><p className="muted">선택한 지역 중 한 곳에서 식탁을 준비해요.</p><div className="availability-areas">{q.data?.areas?.map((area:string)=><label className={`event-option ${areas.includes(area)?'selected':''}`} key={area}><input type="checkbox" checked={areas.includes(area)} onChange={()=>toggle(area,areas,setAreas,4)}/>{area}</label>)}</div><Link className="inline-link" href="/restaurants">지역별 식당과 후기 살펴보기 →</Link><button className="button primary full" disabled={!dates.length||!areas.length}>다음 · 참가권 확인</button></>:<><div className="selection-summary"><span>가능한 날 {dates.length}개 · 지역 {areas.length}곳</span><button type="button" className="text-button" onClick={()=>setStep(1)}>변경</button></div><h2>참가권 확인</h2><p>여러 날짜를 골라도 한 번의 만남을 준비해요. 식사 비용은 현장에서 각자 계산해요.</p><div className="pass-grid">{passes.map(p=><label className={`pass-option ${pass===p.id?'selected':''}`} key={p.id}><input type="radio" name="pass" checked={pass===p.id} onChange={()=>setPass(p.id)}/><span>{p.title}</span><strong>{p.price}</strong><small>{p.note}</small></label>)}</div><div className="notice"><strong>어울리는 사람, 어울리는 공간</strong><p>공통 관심사와 가능한 일정을 살펴 식탁을 추천하고, 운영자가 확인한 뒤 언제 어디서 누구와 만나는지 알려드려요.</p></div><button className="button primary full" disabled={busy}>{busy?'저장 중…':'이 날들에 만날 수 있어요'}</button></>}
+ <FormNotice message={notice}/></form></JourneyState>;
 }

@@ -74,6 +74,22 @@ test('feedback is attendance-gated, private, editable and retractable on SQLite 
    assert.equal(real.metrics[0].feedbackCount,Number(direct.count));assert.ok(!JSON.stringify(real.latest).includes(peer));
    const route=await import('../app/api/admin/insights/route');assert.equal((await route.GET(new Request('http://localhost/api/admin/insights',{headers}))).status,403);
   });
+  await t.test('only an explicit separate restaurant review is published, and edits or deletion retract it',async()=>{
+   const f=await fixture(),venue=(await db.query<any>("INSERT INTO venues(name,area,address,capacity) VALUES('후기 식당','홍대/합정','마포구',20) RETURNING id")).rows[0].id;
+   await db.query('UPDATE dining_tables SET venue_id=$2 WHERE id=$1',[f.table,venue]);
+   const {venueCatalog}=await import('../lib/venues');
+   await save(f.table);
+   assert.equal((await venueCatalog()).find(v=>v.id===venue)?.reviewCount,0);
+   const body={...payload,publishVenueReview:true,venueReview:'음식이 맛있고 대화하기 좋은 조용한 자리였어요.'};
+   assert.equal((await mutate(f.table,{...body,venueReview:''})).status,400);
+   assert.equal((await mutate(f.table,body)).status,200);
+   const visible=(await venueCatalog()).find(v=>v.id===venue)!;assert.equal(visible.reviewCount,1);assert.equal(visible.reviews[0].body,body.venueReview);assert.equal(visible.reviews[0].author_name,'식탁 멤버');assert.ok(!JSON.stringify(visible).includes(payload.comment));
+   assert.equal((await(await get(f.table)).json()).feedback.publishVenueReview,true);
+   assert.equal((await mutate(f.table,{...body,publishVenueReview:false})).status,200);
+   assert.equal((await venueCatalog()).find(v=>v.id===venue)?.reviewCount,0);
+   assert.equal((await mutate(f.table,body)).status,200);assert.equal((await mutate(f.table,{},'DELETE')).status,200);
+   assert.equal((await venueCatalog()).find(v=>v.id===venue)?.reviewCount,0);
+  });
   await t.test('confirmed preferences feed the next real automatic matching run',async()=>{
    const r=await preferences.PUT(new Request('http://localhost/api/preferences',{method:'PUT',headers,body:JSON.stringify({learningEnabled:true,confirmed:true,atmosphere:'CALM',interests:['독서']})}));assert.equal(r.status,200);
    const event=randomUUID(),start=new Date(Date.now()+7*86400000);
@@ -85,7 +101,7 @@ test('feedback is attendance-gated, private, editable and retractable on SQLite 
     await db.query("INSERT INTO payments(application_id,idempotency_key,amount_cents,status) VALUES($1,$2,8000,'PAID')",[app,randomUUID()]);
     await db.query('INSERT INTO application_options(application_id,event_id) VALUES($1,$2)',[app,event]);
    }
-   const {runMatching}=await import('../lib/lifecycle-service');const run=await runMatching(event);assert.equal(run.matchedCount,4);
+   const {seedConfirmedMatching:runMatching}=await import('../lib/lifecycle-service');const run=await runMatching(event);assert.equal(run.matchedCount,4);
    const raw=(await db.query<any>('SELECT input_snapshot FROM match_runs WHERE id=$1',[run.runId])).rows[0].input_snapshot;const snapshot=typeof raw==='string'?JSON.parse(raw):raw;
    const matched=snapshot.candidates.find((c:any)=>c.userId===user);assert.equal(matched.atmosphere,'CALM');assert.deepEqual(matched.preferredInterests,['독서·글쓰기']);assert.ok(snapshot.policy.learningEnabled);const {feedbackInsights}=await import('../lib/insights');const cohort=await feedbackInsights(db,'real',new Date(Date.now()-10*86400000).toISOString(),new Date(Date.now()+86400000).toISOString());assert.ok(cohort.metrics.reduce((n,m)=>n+m.actualReapplications,0)>0);
   });

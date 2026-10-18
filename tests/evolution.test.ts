@@ -27,8 +27,8 @@ test('three-operator support preserves ownership, private notes, ordering, versi
   const headers=(id?:string,cookie?:string)=>({origin:'http://localhost','content-type':'application/json',...(id?{cookie:`todaytable_session=${sessions.get(id)}`} :cookie?{cookie}: {})});
   const collection=await import('../app/api/support/route');const detail=await import('../app/api/support/[id]/route');const team=await import('../app/api/admin/team/route');
   const post=(body:any,id?:string,cookie?:string)=>collection.POST(new Request('http://localhost/api/support',{method:'POST',headers:headers(id,cookie),body:JSON.stringify(body)}));
-  const get=(ticket:string,id?:string,cookie?:string)=>detail.GET(new Request(`http://localhost/api/support/${ticket}`,{headers:headers(id,cookie)}),{params:Promise.resolve({id:ticket})});
-  const mutate=(ticket:string,body:any,id?:string,cookie?:string)=>detail.POST(new Request(`http://localhost/api/support/${ticket}`,{method:'POST',headers:headers(id,cookie),body:JSON.stringify(body)}),{params:Promise.resolve({id:ticket})});
+  const get=(ticket:string,id?:string,cookie?:string)=>detail.GET(new Request(`http://localhost/api/support/${ticket}${operators.some(o=>o.user_id===id)?'?view=operator':''}`,{headers:headers(id,cookie)}),{params:Promise.resolve({id:ticket})});
+  const mutate=(ticket:string,body:any,id?:string,cookie?:string)=>detail.POST(new Request(`http://localhost/api/support/${ticket}${operators.some(o=>o.user_id===id)?'?view=operator':''}`,{method:'POST',headers:headers(id,cookie),body:JSON.stringify(body)}),{params:Promise.resolve({id:ticket})});
   let ticket='';
   await t.test('authenticated and guest requests are repeat-safe and isolated',async()=>{
    const b={subject:'매칭 안내를 알고 싶어요',category:'MATCHING',body:'언제 식탁이 확정되나요?',requestKey:randomUUID()};
@@ -100,7 +100,7 @@ test('three-operator support preserves ownership, private notes, ordering, versi
    assert.equal((await studio.POST(request({action:'DEFAULT',policyId:'balanced-v1',version:def.version}))).status,409);
    assert.equal((await studio.POST(request({action:'DEFAULT',policyId:'balanced-v1',version:Number(def.version)+1}))).status,200);
    await db.query('UPDATE events SET application_deadline=$2 WHERE id=$1',[event,new Date(Date.now()-1000)]);
-   const {runMatching}=await import('../lib/lifecycle-service');const result=await runMatching(event);assert.equal(result.matchedCount,8);
+   const {seedConfirmedMatching:runMatching}=await import('../lib/lifecycle-service');const result=await runMatching(event);assert.equal(result.matchedCount,8);
    assert.equal((await db.query<any>('SELECT rule_version FROM match_runs WHERE id=$1',[result.runId])).rows[0].rule_version,'affinity-v1');
    const actual=(await db.query<any>("SELECT tm.table_id,tm.user_id FROM table_members tm JOIN dining_tables dt ON dt.id=tm.table_id WHERE dt.event_id=$1 AND tm.status='ACTIVE' ORDER BY tm.table_id,tm.user_id",[event])).rows;
    const actualGroups=[...new Set(actual.map(r=>r.table_id))].map(id=>actual.filter(r=>r.table_id===id).map(r=>r.user_id).sort()).sort();
@@ -127,7 +127,7 @@ test('three-operator support preserves ownership, private notes, ordering, versi
    const {matchingInput,effectivePolicy,evaluatePolicy}=await import('../lib/matching-policy');
    const input=await matchingInput(db,a),p=await effectivePolicy(db,a),preview=evaluatePolicy(input,p);
    assert.equal(preview.matchedCount,12);assert.deepEqual(evaluatePolicy(input,p),preview);
-   const {runMatching}=await import('../lib/lifecycle-service');const actual=await runMatching(a);assert.equal(actual.matchedCount,12);assert.deepEqual(await runMatching(a),actual);
+   const {seedConfirmedMatching:runMatching}=await import('../lib/lifecycle-service');const actual=await runMatching(a);assert.equal(actual.matchedCount,12);assert.deepEqual(await runMatching(a),actual);
    const rows=(await db.query<any>('SELECT t.event_id,t.id,r.rule_version,count(tm.user_id) seats FROM dining_tables t JOIN match_runs r ON r.id=t.match_run_id JOIN table_members tm ON tm.table_id=t.id WHERE t.event_id IN ($1,$2) GROUP BY t.event_id,t.id,r.rule_version',[a,b])).rows;
    assert.equal((await db.query('SELECT 1 FROM dining_tables WHERE event_id=$1',[future])).rowCount,0);
    assert.equal(rows.length,2);for(const row of rows){assert.equal(Number(row.seats),6);assert.equal(row.rule_version,row.event_id===a?'balanced-v1':'conversation-v1');}

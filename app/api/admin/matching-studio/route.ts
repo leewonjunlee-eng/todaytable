@@ -26,7 +26,7 @@ export async function POST(request:Request){try{
  let result:any={ok:true};
  if(b.action==='PREVIEW'){
   if(!isCanonicalUuid(b.eventId))problem('회차를 선택해 주세요.');
-  const input=await matchingInput(client,b.eventId,true);if(new Date(input.event.starts_at).getTime()<=Date.now())problem('지난 행사는 다시 매칭하지 않아요.');
+  const input=await matchingInput(client,b.eventId,true,true);if(new Date(input.event.starts_at).getTime()<=Date.now())problem('지난 행사는 다시 매칭하지 않아요.');
   const policies=(await client.query<any>('SELECT * FROM matching_policies ORDER BY created_at,id')).rows.map(policy);const active=await effectivePolicy(client,b.eventId);
   const results=policies.map(p=>evaluatePolicy(input,p));const baseline=results.find(r=>r.policyId===active.id)??evaluatePolicy(input,active);
   const baselinePairs=new Set(baseline.groups.flatMap(g=>g.members.flatMap(a=>g.members.filter(m=>m.userId!==a.userId).map(m=>`${a.userId}:${m.userId}`))));
@@ -41,9 +41,12 @@ export async function POST(request:Request){try{
   if((await client.query('SELECT 1 FROM dining_tables WHERE event_id=$1 LIMIT 1',[preview.event_id])).rowCount)problem('이미 확정된 식탁이 있어요. 이 회차의 기조는 바꿀 수 없습니다.',409);
   if(!(await client.query('SELECT 1 FROM matching_policies WHERE id=$1',[b.policyId])).rowCount)problem('매칭 기조를 확인해 주세요.');
   const results=parseJson<any[]>(preview.results,[]);if(!results.some(r=>r.policyId===b.policyId))problem('비교한 정책만 적용할 수 있어요.');
-  const input=await matchingInput(client,preview.event_id,true);if(input.hash!==preview.snapshot_hash)problem('참가자나 선호가 바뀌었어요. 미리보기를 다시 실행해 주세요.',409);
+  const input=await matchingInput(client,preview.event_id,true,true);if(input.hash!==preview.snapshot_hash)problem('참가자나 선호가 바뀌었어요. 미리보기를 다시 실행해 주세요.',409);
   await client.query('INSERT INTO event_policies(event_id,policy_id,preview_hash,applied_by) VALUES($1,$2,$3,$4) ON CONFLICT(event_id) DO UPDATE SET policy_id=excluded.policy_id,preview_hash=excluded.preview_hash,applied_by=excluded.applied_by,applied_at=now()',[preview.event_id,b.policyId,input.hash,me.id]);
-  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',$2,$3) ON CONFLICT(job_key) DO NOTHING`,[`match-event:${preview.event_id}`,JSON.stringify({eventId:preview.event_id}),input.event.application_deadline]);
+  // A changed policy replaces only unapproved recommendations; confirmed tables are guarded above.
+  const retired=(await client.query<any>("UPDATE matching_proposals SET status='STALE',version=version+1,review_note='매칭 기조가 변경되어 다시 추천합니다.' WHERE event_id=$1 AND status IN ('PENDING','HELD') RETURNING id",[preview.event_id])).rows;
+  for(const p of retired)await client.query("UPDATE applications SET matching_status='WAITING' WHERE matching_status='MATCHING' AND id IN (SELECT application_id FROM matching_proposal_members WHERE proposal_id=$1)",[p.id]);
+  await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',$2,now()) ON CONFLICT(job_key) DO NOTHING`,[`policy-match:${preview.id}:${b.policyId}`,JSON.stringify({eventId:preview.event_id})]);
  }else if(b.action==='DEFAULT'){
   if(me.team_role!=='OWNER')problem('총괄 운영자만 기본 기조를 바꿀 수 있어요.',403);
   if(!(await client.query('SELECT 1 FROM matching_policies WHERE id=$1',[b.policyId])).rowCount)problem('정책을 확인해 주세요.');

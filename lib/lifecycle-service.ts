@@ -1,3 +1,5 @@
+import {createMatchingProposal,generateMatchingProposals} from './matching-review';
+import {conversationQuestions} from './table-experience';
 import {normalizeInterests} from './feedback-domain';
 import { createHash, randomUUID } from 'node:crypto';
 import { databaseProvider, db, type QueryClient } from './db';
@@ -16,7 +18,7 @@ function deterministicUuid(value: string): string {
 
 export type MatchingRun = { runId: string; matchedCount: number; qualityScore: number; unmatched: string[]; groups: string[][] };
 
-export async function provisionTable(client: QueryClient, tableId: string, eventId: string, members: MatchCandidate[]) {
+export async function provisionTable(client: QueryClient, tableId: string, eventId: string, members: MatchCandidate[], selectedVenueId?:string) {
   if (databaseProvider === 'sqlite') {
     const exists = await client.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='journey_rooms'", [], "SELECT name FROM sqlite_master WHERE type='table' AND name='journey_rooms'");
     if (!exists.rowCount) return;
@@ -30,7 +32,7 @@ export async function provisionTable(client: QueryClient, tableId: string, event
   }
   const row = event.rows[0];
   if (!row) throw new Error('MATCH_EVENT venue lookup failed.');
-  let venueId: string | undefined;
+  let venueId: string | undefined=selectedVenueId;
   if (!venueId) {
     const venue = await client.query<any>(`SELECT v.id FROM venues v WHERE v.active AND v.area=$1 AND v.capacity >= $2 + COALESCE((SELECT SUM(t.capacity) FROM dining_tables t WHERE t.event_id=$3 AND t.venue_id=v.id AND t.id<>$4),0) ORDER BY v.capacity,v.id LIMIT 1`, [row.area, members.length, eventId, tableId], `SELECT v.id FROM venues v WHERE v.active=1 AND v.area=$1 AND v.capacity >= $2 + COALESCE((SELECT SUM(t.capacity) FROM dining_tables t WHERE t.event_id=$3 AND t.venue_id=v.id AND t.id<>$4),0) ORDER BY v.capacity,v.id LIMIT 1`);
     if (!venue.rowCount) {
@@ -43,8 +45,7 @@ export async function provisionTable(client: QueryClient, tableId: string, event
   }
   await client.query(`UPDATE dining_tables SET venue_id=$2,starts_at=$3,area=$4,capacity=$5,locked_at=now(),provision_status='PROVISIONED' WHERE id=$1`, [tableId, venueId, row.starts_at, row.area, members.length], `UPDATE dining_tables SET venue_id=$2,starts_at=$3,area=$4,capacity=$5,locked_at=CURRENT_TIMESTAMP,provision_status='PROVISIONED' WHERE id=$1`);
   await client.query(`INSERT INTO table_reservations(table_id,venue_id,reservation_name,meeting_time,status,provider) VALUES($1,$2,$3,$4,'CONFIRMED','MOCK') ON CONFLICT(table_id) DO UPDATE SET venue_id=excluded.venue_id,meeting_time=excluded.meeting_time,status='CONFIRMED'`, [tableId, venueId, `Todaytable ${tableId.slice(0, 8)}`, row.starts_at]);
-  const topics = Array.from(new Set(members.flatMap((m) => m.interests))).slice(0, 5);
-  while (topics.length < 3) topics.push(['서울 저녁 맛집', '여행', '취향 공유'][topics.length]);
+  const topics=conversationQuestions(members);
   const room = randomUUID();
   await client.query(`INSERT INTO journey_rooms(id,table_id,welcome_message,rules_message,curation_message,topics) VALUES($1,$2,$3,$4,$5,${pgJson('$6')}) ON CONFLICT(table_id) DO NOTHING`, [room, tableId, '식탁에 오신 것을 환영해요.', '서로의 경계를 존중하고 개인정보를 공유하지 마세요.', '오늘의 대화 주제를 골라 편안하게 시작해 보세요.', json(topics)], `INSERT INTO journey_rooms(id,table_id,welcome_message,rules_message,curation_message,topics) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(table_id) DO NOTHING`);
   const actualRoom = await client.query<{ id: string }>('SELECT id FROM journey_rooms WHERE table_id=$1', [tableId]);
@@ -70,11 +71,11 @@ export async function provisionTable(client: QueryClient, tableId: string, event
   await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'POST_CONTENT',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`content:${eventId}:${scheduleKey}:v1`, json({ eventId, tableId }), row.starts_at]);
   await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'CLOSE_ATTENDANCE',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`close-attendance:${scheduleKey}`, json({ tableId, eventId }), row.ends_at]);
   await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'FEEDBACK_FOLLOWUP',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`feedback-followup:${scheduleKey}`, json({ tableId }), new Date(feedbackAt.getTime() + 24 * 60 * 60 * 1000)]);
-  for (const member of members) await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by) VALUES($1,$2,$3,'IN_APP','SENT',$2)`, [eventId, member.userId, '식탁이 확정되었어요. 채팅방에서 인사를 나눠 보세요.']);
+  for (const member of members) await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by,action_url) VALUES($1,$2,$3,'IN_APP','SENT',$2,$4)`, [eventId, member.userId, '식탁이 확정되었어요. 채팅방에서 인사를 나눠 보세요.', `/tables/${tableId}`]);
 }
 
 /** Rebuilds a cancelled table from its remaining members and other eligible applicants. */
-export async function repairTable(tableId: string, eventId?: string, connection?: QueryClient) {
+export async function repairTable(tableId: string, eventId?: string, connection?: QueryClient, proposalOnly=true) {
   const client = connection ?? await db.connect(); const own = !connection;
   try {
     if (own) await client.query('BEGIN');
@@ -96,13 +97,13 @@ export async function repairTable(tableId: string, eventId?: string, connection?
       JOIN application_options o ON o.application_id=a.id JOIN events e ON e.id=o.event_id
       WHERE a.status='SUBMITTED' AND a.matching_status IN ('WAITING','REALLOCATING') AND p.status='PAID'
         AND u.restricted_status='ACTIVE' AND pr.consent_privacy AND pr.consent_operations
-        AND e.status IN ('OPEN','CLOSED') AND (e.status='CLOSED' OR e.application_deadline<=now())
+        AND e.status IN ('OPEN','CLOSED') AND e.starts_at>now()
         AND NOT EXISTS (SELECT 1 FROM table_members tm WHERE tm.application_id=a.id AND tm.status='ACTIVE')`, [], `SELECT DISTINCT a.id application_id,a.user_id,pr.birth_year,pr.gender,pr.mbti,pr.interests,pr.traits,pr.desired_traits
       FROM applications a JOIN users u ON u.id=a.user_id JOIN payments p ON p.application_id=a.id JOIN profiles pr ON pr.user_id=a.user_id
       JOIN application_options o ON o.application_id=a.id JOIN events e ON e.id=o.event_id
       WHERE a.status='SUBMITTED' AND a.matching_status IN ('WAITING','REALLOCATING') AND p.status='PAID'
         AND u.restricted_status='ACTIVE' AND pr.consent_privacy=1 AND pr.consent_operations=1
-        AND e.status IN ('OPEN','CLOSED') AND (e.status='CLOSED' OR e.application_deadline<=CURRENT_TIMESTAMP)
+        AND e.status IN ('OPEN','CLOSED') AND e.starts_at>CURRENT_TIMESTAMP
         AND NOT EXISTS (SELECT 1 FROM table_members tm WHERE tm.application_id=a.id AND tm.status='ACTIVE')`);
     const all = [...existing.rows, ...choices.rows];
     const optionRows = await client.query<any>('SELECT application_id,event_id FROM application_options');
@@ -128,8 +129,7 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     const eventInfo=await client.query<any>(`SELECT id,status,application_deadline,capacity,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events WHERE id IN (${placeholders})`,possibleIds,`SELECT id,status,application_deadline,capacity,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events WHERE id IN (${placeholders})`);
     const eventRows = eventInfo.rows.filter((e: any) =>
       ['OPEN', 'CLOSED'].includes(e.status) &&
-      new Date(e.starts_at).getTime() > Date.now() &&
-      (e.status === 'CLOSED' || new Date(e.application_deadline).getTime() <= Date.now()),
+      new Date(e.starts_at).getTime() > Date.now(),
     );
     for(const event of eventRows.sort((a:any,b:any)=>Number(b.id===actualEventId)-Number(a.id===actualEventId)||a.id.localeCompare(b.id))) {
       const eventPolicy = await effectivePolicy(client, event.id);
@@ -158,6 +158,12 @@ export async function repairTable(tableId: string, eventId?: string, connection?
       break;
     }
     if (best) {
+      if(proposalOnly){
+        const target=(await client.query<any>("SELECT id,area,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events WHERE id=$1",[selectedEventId],"SELECT id,area,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events WHERE id=$1")).rows[0];
+        const run=randomUUID();await client.query("INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$3,$4,$5,'COMPLETED',0,$6,now())",[run,selectedEventId,policy.id,`repair-review:${tableId}`,json({reviewRequired:true,policy,candidates:best}),groupScore(best,selectedWeights)]);
+        const proposal=await createMatchingProposal(client,target,best,policy,run,groupScore(best,selectedWeights),explainGroup(best,policy),tableId);
+        if(own)await client.query('COMMIT');return {status:'REVIEW',tableId,proposalId:proposal?.id};
+      }
       // Retire the previous schedule before provisioning the repaired table.
       // New jobs use the new match run so old effect markers cannot suppress them.
       await client.query(`UPDATE scheduled_jobs SET status='DONE',completed_at=now(),lease_owner=NULL,lease_until=NULL
@@ -186,7 +192,8 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     return {status:'EXCEPTION',tableId};
   } catch(error){if(own) await client.query('ROLLBACK');throw error;} finally {if(own)client.release();}
 }
-export async function runMatching(eventId: string, seed = 'core-v1', connection?: QueryClient): Promise<MatchingRun> {
+/** Historical fixture generation only. Runtime matching always uses the reviewed path below. */
+export async function seedConfirmedMatching(eventId: string, seed = 'core-v1', connection?: QueryClient): Promise<MatchingRun> {
   const client = connection ?? await db.connect();
   const own = !connection;
   try {
@@ -253,6 +260,8 @@ export async function runMatching(eventId: string, seed = 'core-v1', connection?
     return { runId, matchedCount:actualMatched, qualityScore:Number(accepted.reduce((n, g) => n + g.score, 0).toFixed(6)), unmatched:actualUnmatched.map((m) => m.applicationId), groups:accepted.map((g) => g.members.map((m) => m.applicationId)) };
   } catch (error) { if (own) await client.query('ROLLBACK'); throw error; } finally { if (own) client.release(); }
 }
+
+export async function runMatching(eventId:string,seed='review-v1',connection?:QueryClient){return generateMatchingProposals(eventId,seed,connection);}
 
 export async function resolveApplication(userId: string, applicationId: string, choice: 'TRANSFER'|'HOLD'|'REFUND', version: number, eventId?: string) {
   const client = await db.connect();

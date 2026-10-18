@@ -348,7 +348,7 @@ test('worker claims safely, recovers leases, deduplicates effects, and retries t
 });
 
 test('core lifecycle matches eligible cohorts and persists privacy-safe explanations', { skip: skipReason }, async () => {
-  const { runMatching } = await import('../lib/lifecycle-service');
+  const { seedConfirmedMatching:runMatching } = await import('../lib/lifecycle-service');
   const event = await client.query(`INSERT INTO events(title,starts_at,application_deadline,area,capacity,price_cents,created_by) VALUES('core lifecycle',now()+interval '3 days',now()-interval '1 minute','홍대/합정',30,8000,$1) RETURNING id`, [adminUserId]);
   const eventId = event.rows[0].id as string;
   for (let i = 0; i < 8; i += 1) {

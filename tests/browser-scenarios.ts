@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/security';
 import { databaseProvider, db } from '../lib/db';
 import { submitApplication } from '../lib/application-service';
-import { runMatching } from '../lib/lifecycle-service';
+import { seedConfirmedMatching as runMatching } from '../lib/lifecycle-service';
 import { claimJob, failJob, processJob } from '../worker/index';
 
 type Browser = { newPage(): Promise<any>; close(): Promise<void> };

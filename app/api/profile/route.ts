@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
 import { apiUser } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { DESIRED_TRAITS, FOOD_BUDGETS, INTERESTS, TRAITS } from '@/lib/domain';
+import {profileInput} from '@/lib/profile-validation';
 import { sameOrigin } from '@/lib/http';
 
 export const runtime = 'nodejs';
+export const dynamic='force-dynamic';
 
 export async function GET(request: Request) {
   const user = await apiUser(request);
@@ -15,7 +16,8 @@ export async function GET(request: Request) {
      FROM profiles WHERE user_id=$1`,
     [user.id],
   );
-  return NextResponse.json(result.rows[0] ?? null);
+  const profile=result.rows[0] as any;
+  return NextResponse.json(profile?{...profile,gender:profile.gender==='NON_BINARY'?'PREFER_NOT_TO_SAY':profile.gender}:null);
 }
 
 export async function PUT(request: Request) {
@@ -26,36 +28,8 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const body = await request.json();
-    const selections = [
-      [body.interests, INTERESTS],
-      [body.traits, TRAITS],
-      [body.desiredTraits, DESIRED_TRAITS],
-    ] as const;
-    const currentKstYear = Number(new Intl.DateTimeFormat('en', {
-      timeZone: 'Asia/Seoul', year: 'numeric',
-    }).format(new Date()));
-    const badSelections = selections.some(([values, allowed]) =>
-      !Array.isArray(values) || values.length < 1 || values.length > 10
-      || new Set(values).size !== values.length
-      || values.some((value: unknown) => !allowed.includes(value as never)));
-    const badFoodBudgets = !Array.isArray(body.foodBudgets)
-      || body.foodBudgets.length < 1 || body.foodBudgets.length > 4
-      || new Set(body.foodBudgets).size !== body.foodBudgets.length
-      || body.foodBudgets.some((value: string) => !FOOD_BUDGETS.includes(value as never));
-    const valid = typeof body.name === 'string' && !!body.name.trim() && body.name.length <= 80
-      && typeof body.phone === 'string' && /^01[0-9]-?\d{3,4}-?\d{4}$/.test(body.phone)
-      && Number.isInteger(body.birthYear) && body.birthYear >= 1920
-      && body.birthYear <= currentKstYear - 19
-      && ['WOMAN', 'MAN', 'NON_BINARY', 'PREFER_NOT_TO_SAY'].includes(body.gender)
-      && typeof body.occupation === 'string' && !!body.occupation.trim() && body.occupation.length <= 120
-      && typeof body.mbti === 'string' && /^[IE][NS][FT][JP]$/.test(body.mbti)
-      && !badSelections && !badFoodBudgets
-      && typeof body.dietaryNotes === 'string' && body.dietaryNotes.length <= 1000
-      && body.privacy === true && body.operations === true;
-    if (!valid) {
-      return NextResponse.json({ error: '필수 항목과 동의를 확인해 주세요.' }, { status: 400 });
-    }
+    const {value:body,fields}=profileInput(await request.json());
+    if(Object.keys(fields).length)return NextResponse.json({error:Object.values(fields)[0],fields},{status:400});
 
     await db.query(
       `INSERT INTO profiles(

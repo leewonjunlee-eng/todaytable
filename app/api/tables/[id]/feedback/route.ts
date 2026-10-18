@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
 async function membership(client: Pick<QueryClient,'query'>, id: string, userId: string) {
   const row = (await client.query<any>(`SELECT e.starts_at,e.ends_at,e.is_demo,a.is_demo application_demo,u.is_demo user_demo,ar.status attendance_status,
-    t.status table_status,tm.application_id FROM table_members tm
+    t.status table_status,t.venue_id,tm.application_id FROM table_members tm
     JOIN dining_tables t ON t.id=tm.table_id JOIN events e ON e.id=t.event_id
     JOIN applications a ON a.id=tm.application_id JOIN users u ON u.id=tm.user_id
     LEFT JOIN attendance_records ar ON ar.application_id=tm.application_id AND ar.event_id=e.id
@@ -29,9 +29,10 @@ export async function GET(request: Request, context: Context) {
       LEFT JOIN feedback_details d ON d.feedback_id=f.id WHERE f.table_id=$1 AND f.author_user_id=$2`,[id,user.id])).rows[0];
     const pref=(await db.query<any>('SELECT learning_enabled FROM participant_preferences WHERE user_id=$1',[user.id])).rows[0];
     if(!f)return Response.json({feedback:null,learningEnabled:pref?.learning_enabled??true});
+    const publicReview=(await db.query<any>('SELECT body FROM venue_public_reviews WHERE feedback_id=$1',[f.id])).rows[0];
     const rel=(await db.query<any>('SELECT target_user_id,relationship_type FROM feedback_relationships WHERE table_id=$1 AND source_user_id=$2',[id,user.id])).rows;
     return Response.json({feedback:{id:f.id,tableScore:f.table_score,conversationScore:f.conversation_score,venueScore:f.venue_score,
-      returnIntent:Boolean(f.return_intent),recommendIntent:Boolean(f.recommend_intent),comment:f.comment,
+      publishVenueReview:Boolean(publicReview),venueReview:publicReview?.body??'',returnIntent:Boolean(f.return_intent),recommendIntent:Boolean(f.recommend_intent),comment:f.comment,
       positives:parseJson(f.positives,[]),improvements:parseJson(f.improvements,[]),goodText:f.good_text??'',improveText:f.improve_text??'',
       nextAtmosphere:f.next_atmosphere??'BALANCED',nextInterests:normalizeInterests(parseJson(f.next_interests,[])),preferenceConfirmed:f.preference_confirmed??false,
       likedUserIds:rel.filter(r=>r.relationship_type==='LIKE').map(r=>r.target_user_id),
@@ -59,6 +60,8 @@ async function mutate(request:Request,context:Context,remove=false){
         const scores=[b.tableScore,b.conversationScore,b.venueScore];
         if(scores.some(x=>!Number.isInteger(x)||x<1||x>5)||typeof b.returnIntent!=='boolean'||typeof b.recommendIntent!=='boolean')problem('점수와 재참여 의견을 확인해 주세요.');
         for(const name of ['comment','goodText','improveText'])if(b[name]!==undefined&&(typeof b[name]!=='string'||b[name].length>2000))problem('메모는 2,000자 이내로 입력해 주세요.');
+        if(b.publishVenueReview!==undefined&&typeof b.publishVenueReview!=='boolean')problem('식당 후기 공개 여부를 확인해 주세요.');
+        if(b.publishVenueReview===true&&(!access.venue_id||typeof b.venueReview!=='string'||b.venueReview.trim().length<5||b.venueReview.length>1000))problem('공개할 식당 후기를 5~1,000자로 남겨주세요.');
         const positives=stringArray(b.positives??[],7,x=>Object.hasOwn(FEEDBACK_TAGS,x)),improvements=stringArray(b.improvements??[],7,x=>Object.hasOwn(FEEDBACK_TAGS,x));
         const interests=normalizeInterests(stringArray(b.nextInterests??[],10)),atmosphere=b.nextAtmosphere??'BALANCED';
         if(typeof atmosphere!=='string'||!Object.hasOwn(ATMOSPHERES,atmosphere))problem('다음 대화 분위기를 확인해 주세요.');
@@ -70,6 +73,8 @@ async function mutate(request:Request,context:Context,remove=false){
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(table_id,author_user_id) DO UPDATE SET table_score=excluded.table_score,
           conversation_score=excluded.conversation_score,venue_score=excluded.venue_score,return_intent=excluded.return_intent,recommend_intent=excluded.recommend_intent,
           comment=excluded.comment,is_demo=excluded.is_demo RETURNING id`,[randomUUID(),id,user.id,...scores,b.returnIntent,b.recommendIntent,b.comment??'',access.is_demo])).rows[0].id;
+        if(b.publishVenueReview===true)await client.query(`INSERT INTO venue_public_reviews(id,venue_id,author_user_id,table_id,feedback_id,score,body,is_demo) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(feedback_id) DO UPDATE SET score=excluded.score,body=excluded.body,updated_at=now()`,[randomUUID(),access.venue_id,user.id,id,feedbackId,b.venueScore,b.venueReview.trim(),access.is_demo]);
+        else await client.query('DELETE FROM venue_public_reviews WHERE feedback_id=$1',[feedbackId]);
         await client.query(`INSERT INTO feedback_details(feedback_id,positives,improvements,good_text,improve_text,next_atmosphere,next_interests,preference_confirmed)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(feedback_id) DO UPDATE SET positives=excluded.positives,improvements=excluded.improvements,
           good_text=excluded.good_text,improve_text=excluded.improve_text,next_atmosphere=excluded.next_atmosphere,next_interests=excluded.next_interests,

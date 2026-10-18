@@ -2,7 +2,7 @@
 import {FormEvent,useEffect,useState} from 'react';
 import {ATMOSPHERES,FEEDBACK_TAGS} from '@/lib/feedback-domain';
 import {FormNotice,journeyFetch,JourneyState,useJourney} from './journey-ui';
-const initial={tableScore:4,conversationScore:4,venueScore:4,returnIntent:true,recommendIntent:true,comment:'',positives:[] as string[],improvements:[] as string[],goodText:'',improveText:'',nextAtmosphere:'BALANCED',nextInterests:[] as string[],preferenceConfirmed:false,likedUserIds:[] as string[],dislikedUserIds:[] as string[]};
+const initial={publishVenueReview:false,venueReview:'',tableScore:4,conversationScore:4,venueScore:4,returnIntent:true,recommendIntent:true,comment:'',positives:[] as string[],improvements:[] as string[],goodText:'',improveText:'',nextAtmosphere:'BALANCED',nextInterests:[] as string[],preferenceConfirmed:false,likedUserIds:[] as string[],dislikedUserIds:[] as string[]};
 export function FeedbackForm({id,detail,onSaved}:{id:string;detail:any;onSaved:()=>Promise<void>}){
  const q=useJourney(`/api/tables/${id}/feedback`);const [form,setForm]=useState(initial),[interests,setInterests]=useState(''),[learning,setLearning]=useState(true),[step,setStep]=useState(0),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  useEffect(()=>{if(!q.data)return;setForm({...initial,...q.data.feedback});setInterests((q.data.feedback?.nextInterests??[]).join(', '));setLearning(q.data.learningEnabled);},[q.data]);
@@ -25,7 +25,8 @@ export function FeedbackForm({id,detail,onSaved}:{id:string;detail:any;onSaved:(
   {step===1&&<>
    {(['positives','improvements'] as const).map(key=><fieldset key={key}><legend>{key==='positives'?'좋았던 점':'아쉬웠던 점'}</legend><div className="feedback-tags">{Object.entries(FEEDBACK_TAGS).map(([tag,label])=><label className="option-card" key={tag}><input type="checkbox" checked={form[key].includes(tag)} onChange={()=>toggle(key,tag)}/>{label}</label>)}</div></fieldset>)}
    <label>좋았던 경험을 조금 더 알려주세요<textarea value={form.goodText} maxLength={2000} onChange={e=>set('goodText',e.target.value)}/></label><label>개선하면 좋을 점<textarea value={form.improveText} maxLength={2000} onChange={e=>set('improveText',e.target.value)}/></label>
-   <label>추가 메모<textarea value={form.comment} maxLength={2000} onChange={e=>set('comment',e.target.value)}/></label>
+   <fieldset><legend>다녀온 식당 이야기 (선택)</legend><p className="muted">다른 분들이 장소를 고를 때 참고할 수 있어요. 이 항목만 식당 소개에 이름 없이 공개됩니다.</p><label className="check-label"><input type="checkbox" checked={form.publishVenueReview} onChange={e=>set('publishVenueReview',e.target.checked)}/>식당 점수와 아래 후기를 공개할게요</label>{form.publishVenueReview&&<label>공개할 식당 후기<textarea value={form.venueReview} minLength={5} maxLength={1000} onChange={e=>set('venueReview',e.target.value)} placeholder="음식, 좌석, 대화하기 좋은 분위기에 대해 알려주세요." required/></label>}</fieldset>
+   <label>운영팀에 남기는 추가 메모<textarea value={form.comment} maxLength={2000} onChange={e=>set('comment',e.target.value)}/></label>
    <fieldset><legend>멤버에 대한 비공개 의견 (선택)</legend><p className="muted">다른 멤버에게 공개되지 않아요. 안전 문제는 아래 안전 요청으로 알려주세요.</p>{(detail.members??[]).filter((m:any)=>m.user_id!==detail.currentUserId).map((m:any)=><label key={m.user_id}>{m.display_name}<select value={form.likedUserIds.includes(m.user_id)?'LIKE':form.dislikedUserIds.includes(m.user_id)?'DISLIKE':''} onChange={e=>setForm(f=>({...f,likedUserIds:[...f.likedUserIds.filter(x=>x!==m.user_id),...(e.target.value==='LIKE'?[m.user_id]:[])],dislikedUserIds:[...f.dislikedUserIds.filter(x=>x!==m.user_id),...(e.target.value==='DISLIKE'?[m.user_id]:[])]}))}><option value="">선택하지 않음</option><option value="LIKE">좋았던 멤버</option><option value="DISLIKE">다음에는 피하고 싶은 멤버</option></select></label>)}</fieldset>
   </>}
   {step===2&&<>

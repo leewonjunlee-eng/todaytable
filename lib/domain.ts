@@ -28,7 +28,7 @@ export function isCanonicalUuid(value: unknown): value is string {
 
 function isEventIdList(value: unknown): value is string[] {
   return Array.isArray(value)
-    && value.length >= 1 && value.length <= 8
+    && value.length >= 1 && value.length <= 32
     && value.every(isCanonicalUuid);
 }
 
