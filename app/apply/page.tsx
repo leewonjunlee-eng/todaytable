@@ -1,2 +1,5 @@
-import Link from 'next/link';import {requireUser} from '@/lib/auth';import {TopNav} from '@/components/top-nav';import {ApplicationForm} from '@/components/application-form';
-export default async function ApplyPage({searchParams}:{searchParams:Promise<{eventId?:string}>}){const {eventId}=await searchParams;const user=await requireUser();return <><TopNav user={user}/><main className="page narrow"><div className="page-heading"><div className="eyebrow">BOOK YOUR SEAT</div><h1>저녁 신청하기</h1><p>참여할 수 있는 날과 참가권을 골라주세요.</p></div><section className="panel"><ApplicationForm initialEventId={eventId}/></section><p className="fineprint">우연한 식탁은 소개팅이나 이성 만남을 목적으로 하지 않는 소규모 저녁 모임입니다. <Link href="/profile">프로필과 동의 항목</Link>을 먼저 작성해야 신청할 수 있어요.</p></main></>}
+import Link from 'next/link';
+import {requireUser} from '@/lib/auth';
+import {JourneyLayout} from '@/components/journey-ui';
+import {ApplicationForm} from '@/components/application-form';
+export default async function ApplyPage({searchParams}:{searchParams:Promise<{eventId?:string}>}){const {eventId}=await searchParams;await requireUser();return <JourneyLayout title="저녁 신청하기" back="/applications" focus><section className="panel"><ApplicationForm initialEventId={eventId}/></section><p className="fineprint">4~6명이 함께하는 소규모 저녁 모임입니다. <Link href="/profile/edit">프로필과 동의 항목</Link>을 먼저 확인해 주세요.</p></JourneyLayout>;}

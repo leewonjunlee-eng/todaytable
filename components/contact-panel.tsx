@@ -1,5 +1,6 @@
 'use client';
 import Link from 'next/link';
+import {UiIcon} from './ui-icon';
 import {FormEvent,KeyboardEvent,useRef,useState} from 'react';
 import {usePathname} from 'next/navigation';
 import {SUPPORT_CATEGORIES} from '@/lib/support-domain';
@@ -22,7 +23,7 @@ export function ContactPanel({loggedIn}:{loggedIn:boolean}){
   const result=await journeyFetch('/api/support',{method:'POST',body:JSON.stringify({name:form.get('name'),email:form.get('email'),subject:form.get('subject'),category:form.get('category'),body:form.get('body'),requestKey:key.current,tableId:table})});
   location.href=`/support?id=${encodeURIComponent(result.id)}`;
  }catch(e){setMessage(e instanceof Error?e.message:'접수하지 못했어요.');setBusy(false);}}
- return <><button ref={button} className="contact-fab" type="button" onClick={open} aria-haspopup="dialog" aria-label="운영팀에 문의하기"><span>✉</span> 이야기 나누기</button><dialog className="contact-dialog" ref={dialog} aria-labelledby="contact-title" onKeyDown={keepFocus} onClose={()=>button.current?.focus()}>
+ return <><button ref={button} className="contact-fab" type="button" onClick={open} aria-haspopup="dialog" aria-label="운영팀에 문의하기"><span><UiIcon name="message" size={20}/></span> 이야기 나누기</button><dialog className="contact-dialog" ref={dialog} aria-labelledby="contact-title" onKeyDown={keepFocus} onClose={()=>button.current?.focus()}>
   <div className="section-title"><h2 id="contact-title">어떤 이야기를 들려주실래요?</h2><button type="button" className="text-button" onClick={close} aria-label="문의 창 닫기">닫기 ×</button></div>
   <p>접수 후 문의함에서 답변을 확인하고 추가 질문을 이어갈 수 있어요.</p><form className="form-stack" onSubmit={submit}>
    {!loggedIn&&<div className="form-grid"><label>이름<input name="name" required maxLength={60}/></label><label>이메일<input name="email" type="email" required maxLength={254}/></label></div>}

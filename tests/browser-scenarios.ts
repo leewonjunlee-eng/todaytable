@@ -75,6 +75,7 @@ try {
   await login(participantEmails[0]);
   await page.goto(new URL('/apply', baseUrl).toString());
   await page.locator('label.event-option').filter({ hasText: cancelTitle }).locator('input').check();
+  await page.getByRole('button', { name: /다음 · 참가권 선택/ }).click();
   await page.getByRole('button', { name: /참가 신청 완료하기/ }).click();
   await page.getByText(/신청이 저장되었어요 · 결제/).waitFor();
   const applications = await browserFetch('/api/applications');

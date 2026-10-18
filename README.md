@@ -6,6 +6,8 @@
 
 **현재 현황 (2026-10-18):** 공동 문의함·3인 운영·매칭 스튜디오·후기 개인화·인사이트·화면 개편을 완료해 Railway 웹·워커에 배포했습니다. 전체 테스트 47개, SQLite/PostgreSQL 인수 시나리오 각 20개, 타입 검사·프로덕션 빌드·실제 브라우저 및 키보드 검증이 통과했습니다. 기존 계정·신청·결제·확정 식탁과 원본 설문 294행을 보존했습니다.
 
+참가자 화면은 모바일 카드 목록과 전용 상세 화면으로 구성합니다. 마이 페이지에서 프로필·선호·참가권·지난 만남을 따로 열 수 있고, 신청은 일정 선택과 참가권 확인의 두 단계로 진행합니다. 다이닝 이미지와 아이콘의 제작 기록은 [비주얼 에셋](docs/VISUAL_ASSETS.md)에 있습니다.
+
 [현재 현황과 우선순위](docs/STATUS.md) · [문서 안내](docs/README.md) · [제품 확장 계획](docs/PRODUCT_EVOLUTION_PLAN.md) · [배포 방법](DEPLOY.md)
 
 운영 사이트: https://todaytable-production.up.railway.app · 새 운영자 B/C의 계정 정보는 Git에 제외된 `.data/production-operator-credentials.json`에 보관되어 있습니다.

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {UiIcon} from './ui-icon';
 import {SiteNav} from './site-nav';
 
 export type JourneyData = {
@@ -113,6 +114,7 @@ export function JourneyLayout({
   back = '/',
   actions,
   loggedIn=true,
+  focus=false,
 }: {
   title: string;
   eyebrow?: string;
@@ -121,12 +123,13 @@ export function JourneyLayout({
   back?: string;
   actions?: ReactNode;
   loggedIn?: boolean;
+  focus?: boolean;
 }) {
   return (
     <>
-      <SiteNav admin={Boolean(eyebrow?.startsWith('ADMIN'))} loggedIn={loggedIn}/>
-      <main className={`page evolution-page ${eyebrow?.startsWith('ADMIN')?'admin-page':'participant-page'}`}>
-        <Link className="back-link" href={back}>← 돌아가기</Link>
+      <SiteNav admin={Boolean(eyebrow?.startsWith('ADMIN'))} loggedIn={loggedIn} focus={focus} back={back} focusTitle={title}/>
+      <main className={`page evolution-page ${eyebrow?.startsWith('ADMIN')?'admin-page':'participant-page'} ${focus?'focus-page':''}`}>
+        {focus&&<Link className="back-link" href={back}>← 돌아가기</Link>}
         <div className="page-heading">
           {eyebrow && <div className="eyebrow">{eyebrow}</div>}
           <h1>{title}</h1>
@@ -208,7 +211,7 @@ export function ApplicationCard({
         </div>
       )}
       {application.table_id && <Link className="inline-link" href={`/tables/${application.table_id}`}>내 식탁 보기 →</Link>}
-      <Link className="inline-link" href={`/applications/${application.id}`}>신청 상세 보기 →</Link>
+
       <Link className="application-support-link" href={`/support?new=1&applicationId=${application.id}`}>이 신청에 대해 문의하기</Link><small className="mono">신청 번호 {application.id}</small>
     </article>
   );
@@ -243,3 +246,10 @@ export function ScoreField({ name, label }: { name: string; label: string }) {
 
 export function FormNotice({ message }: { message: string }) { return message ? <p className="form-notice" role="alert">{message}</p> : null; }
 export function useRequestKey() { const ref = useRef<string | undefined>(undefined); return { next: () => { if (!ref.current) ref.current = crypto.randomUUID(); return ref.current; }, reset: () => { ref.current = undefined; } }; }
+
+export function ApplicationSummary({application}:{application:any}){
+ const event=application.events?.[0];
+ return <Link className="compact-row application-summary" href={`/applications/${application.id}`}>
+  <span className="row-icon"><UiIcon name="table"/></span><span className="row-copy"><strong>{event?.title??'신청한 식탁'}</strong><small>{event?.area??'일정 확인'}{event?.starts_at?` · ${new Date(event.starts_at).toLocaleDateString('ko-KR',{month:'numeric',day:'numeric',weekday:'short',timeZone:'Asia/Seoul'})}`:''}</small><StatusPill value={application.matching_status||application.status}/></span><UiIcon name="chevron" size={17}/>
+ </Link>;
+}
