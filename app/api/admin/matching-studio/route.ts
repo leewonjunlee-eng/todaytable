@@ -27,13 +27,21 @@ export async function POST(request:Request){try{
  if(b.action==='PREVIEW'){
   if(!isCanonicalUuid(b.eventId))problem('회차를 선택해 주세요.');
   const input=await matchingInput(client,b.eventId,true,true);if(new Date(input.event.starts_at).getTime()<=Date.now())problem('지난 행사는 다시 매칭하지 않아요.');
-  const policies=(await client.query<any>('SELECT * FROM matching_policies ORDER BY created_at,id')).rows.map(policy);const active=await effectivePolicy(client,b.eventId);
-  const results=policies.map(p=>evaluatePolicy(input,p));const baseline=results.find(r=>r.policyId===active.id)??evaluatePolicy(input,active);
-  const baselinePairs=new Set(baseline.groups.flatMap(g=>g.members.flatMap(a=>g.members.filter(m=>m.userId!==a.userId).map(m=>`${a.userId}:${m.userId}`))));
-  const named=(await client.query<any>('SELECT user_id,display_name FROM profiles')).rows;const byName=new Map(named.map(p=>[p.user_id,p.display_name]));
-  const comparisons=results.map(r=>({...r,changedSeats:r.groups.flatMap(g=>g.members).filter(m=>{const group=r.groups.find(g=>g.members.some(x=>x.userId===m.userId));return group?.members.some(peer=>peer.userId!==m.userId&&!baselinePairs.has(`${m.userId}:${peer.userId}`));}).length,groups:r.groups.map(g=>({...g,members:g.members.map(m=>({...m,name:byName.get(m.userId)??'참가자'}))}))}));
-  const id=randomUUID();await client.query('INSERT INTO matching_previews(id,event_id,snapshot_hash,snapshot,results,created_by) VALUES($1,$2,$3,$4,$5,$6)',[id,b.eventId,input.hash,JSON.stringify(input.snapshot),JSON.stringify(comparisons),me.id]);
-  result={id,snapshotHash:input.hash,eventId:b.eventId,baselinePolicy:active.id,results:comparisons,notice:input.candidates.length<4?'조건을 만족하는 참가자가 네 명 이상 모이면 식탁을 구성할 수 있어요.':'같은 참가자와 정책이면 결과가 재현됩니다. 후보가 적으면 기조별 결과가 같을 수 있어요.'};
+  if(input.candidates.length<4 && !b.forcePreview){
+    const policies=(await client.query<any>('SELECT * FROM matching_policies ORDER BY created_at,id')).rows.map(policy);const active=await effectivePolicy(client,b.eventId);
+    const results=policies.map(p=>evaluatePolicy(input,p));const baseline=results.find(r=>r.policyId===active.id)??evaluatePolicy(input,active);
+    const comparisons=results.map(r=>({...r,changedSeats:0,groups:[],matchedCount:0,unmatched:input.candidates.map(c=>c.applicationId),qualityScore:0}));
+    const id=randomUUID();
+    result={id,snapshotHash:input.hash,eventId:b.eventId,baselinePolicy:active.id,results:comparisons,notice:`이 회차의 대기 인원(${input.candidates.length}명)으로는 4명 이상인 최소 식탁을 만들 수 없습니다. ${4-input.candidates.length}명 이상이 더 필요합니다.`};
+  }else{
+    const policies=(await client.query<any>('SELECT * FROM matching_policies ORDER BY created_at,id')).rows.map(policy);const active=await effectivePolicy(client,b.eventId);
+    const results=policies.map(p=>evaluatePolicy(input,p));const baseline=results.find(r=>r.policyId===active.id)??evaluatePolicy(input,active);
+    const baselinePairs=new Set(baseline.groups.flatMap(g=>g.members.flatMap(a=>g.members.filter(m=>m.userId!==a.userId).map(m=>`${a.userId}:${m.userId}`))));
+    const named=(await client.query<any>('SELECT user_id,display_name FROM profiles')).rows;const byName=new Map(named.map(p=>[p.user_id,p.display_name]));
+    const comparisons=results.map(r=>({...r,changedSeats:r.groups.flatMap(g=>g.members).filter(m=>{const group=r.groups.find(g=>g.members.some(x=>x.userId===m.userId));return group?.members.some(peer=>peer.userId!==m.userId&&!baselinePairs.has(`${m.userId}:${peer.userId}`));}).length,groups:r.groups.map(g=>({...g,members:g.members.map(m=>({...m,name:byName.get(m.userId)??'참가자'}))}))}));
+    const id=randomUUID();await client.query('INSERT INTO matching_previews(id,event_id,snapshot_hash,snapshot,results,created_by) VALUES($1,$2,$3,$4,$5,$6)',[id,b.eventId,input.hash,JSON.stringify(input.snapshot),JSON.stringify(comparisons),me.id]);
+    result={id,snapshotHash:input.hash,eventId:b.eventId,baselinePolicy:active.id,results:comparisons,notice:input.candidates.length<4?'조건을 만족하는 참가자가 네 명 이상 모이면 식탁을 구성할 수 있어요.':'같은 참가자와 정책이면 결과가 재현됩니다. 후보가 적으면 기조별 결과가 같을 수 있어요.'};
+  }
  }else if(b.action==='APPLY'){
   const preview=(await client.query<any>('SELECT * FROM matching_previews WHERE id=$1',[b.previewId])).rows[0];if(!preview)problem('미리보기를 먼저 실행해 주세요.',404);
   const event=(await client.query<any>('SELECT status,starts_at FROM events WHERE id=$1 FOR UPDATE',[preview.event_id])).rows[0];
