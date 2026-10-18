@@ -14,7 +14,7 @@ export function FeedbackForm({id,detail,onSaved}:{id:string;detail:any;onSaved:(
  async function remove(){if(busy||!window.confirm('이 후기를 삭제할까요? 이 후기에서 얻은 선호 근거도 다시 계산합니다.'))return;setBusy(true);try{await journeyFetch(`/api/tables/${id}/feedback`,{method:'DELETE'});setMessage('후기를 삭제했어요.');setStep(0);await Promise.all([q.refresh(),onSaved()]);}catch(e){setMessage(e instanceof Error?e.message:'삭제하지 못했어요.');}finally{setBusy(false);}}
  return <JourneyState {...q} onRefresh={q.refresh}>{!detail.feedback_eligible?<section className="panel"><h2>후기 작성 안내</h2><p>{!detail.event_ended?'행사가 끝난 뒤 후기를 남길 수 있어요.':'실제 참석 확인 후 후기를 남길 수 있어요. 참석 기록이 다르면 운영팀에 문의해 주세요.'}</p></section>:<form className="panel form-stack feedback-form" onSubmit={submit}>
   <div className="section-title"><h2>{q.data?.feedback?'후기 수정하기':'오늘의 식탁은 어땠나요?'}</h2><span className="tag">약 1~2분</span></div>
-  {detail.table.is_demo&&<p className="notice">모의 식탁의 후기입니다. 실제 개인화 학습과 운영 성과에 포함하지 않아요.</p>}
+
   <nav className="feedback-steps" aria-label="후기 작성 단계">{['경험 점수','좋았던 점과 아쉬움','다음 만남'].map((s,n)=><button type="button" key={s} aria-current={step===n?'step':undefined} onClick={()=>setStep(n)}>{n+1}. {s}</button>)}</nav>
   <p className="sr-only" role="status">{step+1}단계</p>
   {step===0&&<>

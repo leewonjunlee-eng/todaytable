@@ -16,7 +16,8 @@
     "test:sqlite": "node --env-file-if-exists=.env.local --import tsx tests/sqlite.integration.test.ts",
     "test:providers": "node tests/provider-harness.mjs",
     "test:render": "TODAYTABLE_IN_PROCESS_TYPESCRIPT=1 node --env-file-if-exists=.env.local scripts/render-smoke.mjs",
-    "serve:unix": "node --env-file-if-exists=.env.local scripts/serve-unix.mjs"
+    "serve:unix": "node --env-file-if-exists=.env.local scripts/serve-unix.mjs",
+    "db:populate:showcase": "node --env-file-if-exists=.env.local --import tsx scripts/populate-showcase.ts"
   },
   "dependencies": {
     "next": "16.4.2",

@@ -57,7 +57,7 @@ export function ApplicationForm({initialEventId=''}:{initialEventId?:string}) {
         setError(result.error ?? '신청을 저장하지 못했습니다.');
         return;
       }
-      setSuccess(`신청이 저장되었어요 · 모의 결제 ₩${Number(result.amount).toLocaleString()} · 번호 ${String(result.id).slice(0, 8)}`);
+      setSuccess(`신청이 저장되었어요 · 결제 ₩${Number(result.amount).toLocaleString()} · 번호 ${String(result.id).slice(0, 8)}`);
       setRequestKey(crypto.randomUUID());
       setSelectedIds([]);
     } catch {
@@ -76,7 +76,7 @@ export function ApplicationForm({initialEventId=''}:{initialEventId?:string}) {
         : <div className="event-grid">{events.map((option) => (
           <label className={`event-option ${selectedIds.includes(option.id) ? 'selected' : ''}`} key={option.id}>
             <input type="checkbox" checked={selectedIds.includes(option.id)} onChange={(event) => toggleEvent(option.id, event.target.checked)} />
-            <span className="event-area">{option.area}{option.is_demo?' · 모의 회차':''}</span>
+            <span className="event-area">{option.area}</span>
             <strong>{new Date(option.starts_at).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', timeZone: 'Asia/Seoul' })}</strong>
             <small>{new Date(option.starts_at).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: 'numeric', minute: '2-digit' })} · 최대 {option.capacity}명</small>
           </label>
@@ -88,11 +88,11 @@ export function ApplicationForm({initialEventId=''}:{initialEventId?:string}) {
           <span>{option.title}</span><strong>{option.price}</strong><small>{option.note}</small>
         </label>
       ))}</div>
-      <div className="notice"><strong>모의 결제 안내</strong><p>이 서비스는 테스트용으로 결제 승인 상태를 기록합니다. 실제 카드 결제나 환불은 발생하지 않습니다. 매칭과 식당 예약이 완료된 후 단순 변심 환불이 어려울 수 있다는 신청서 안내를 참고해 주세요. 구체적인 환불 정책은 운영 전 확정이 필요합니다.</p></div>
+      <div className="notice"><strong>참가 전 확인해 주세요</strong><p>참가권은 만남 준비를 위한 이용권입니다. 식사 비용은 현장에서 각자 부담해요. 일정 변경과 취소는 신청 내역에서 확인할 수 있어요.</p></div>
       {error && <p className="form-error">{error}</p>}
       {success && <p className="success">{success}</p>}
       <button className="button primary" disabled={busy || loading || !!loadError || events.length === 0}>
-        {busy ? '신청 저장 중…' : '신청하고 모의 결제하기'} <span>→</span>
+        {busy ? '신청 저장 중…' : '참가 신청 완료하기'} <span>→</span>
       </button>
     </form>
   );

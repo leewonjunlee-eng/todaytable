@@ -55,6 +55,7 @@ const cancelEvent = (await db.query<{ id: string }>(`INSERT INTO events(title,st
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
+await context.addInitScript(() => sessionStorage.setItem('todaytable-review-intro-v1', 'seen'));
 const page = await context.newPage();
 async function login(email: string) {
   await page.goto(new URL('/login', baseUrl).toString());
@@ -74,8 +75,8 @@ try {
   await login(participantEmails[0]);
   await page.goto(new URL('/apply', baseUrl).toString());
   await page.locator('label.event-option').filter({ hasText: cancelTitle }).locator('input').check();
-  await page.getByRole('button', { name: /신청하고 모의 결제하기/ }).click();
-  await page.getByText(/신청이 저장되었어요 · 모의 결제/).waitFor();
+  await page.getByRole('button', { name: /참가 신청 완료하기/ }).click();
+  await page.getByText(/신청이 저장되었어요 · 결제/).waitFor();
   const applications = await browserFetch('/api/applications');
   assert.equal(applications.status, 200);
   const cancelledApplication = applications.body.find((row: any) => row.events?.some((event: any) => event.title === cancelTitle));

@@ -35,7 +35,7 @@ export async function seedOperations() {
     const adminId = admin.rows[0].id;
     const viewers = await client.query<{id:string;email:string}>("SELECT id,email FROM users WHERE email IN ('user@todaytable.local','guest@todaytable.local') AND role='PARTICIPANT' ORDER BY email");
     for (const viewer of viewers.rows) await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at)
-      VALUES($1,'체험 참가자','',1995,'PREFER_NOT_TO_SAY','INFP',true,true,now()) ON CONFLICT(user_id) DO NOTHING`, [viewer.id]);
+      VALUES($1,'김지안','',1995,'PREFER_NOT_TO_SAY','INFP',true,true,now()) ON CONFLICT(user_id) DO NOTHING`, [viewer.id]);
     const users: string[] = [];
     for (let n=0; n<48; n++) {
       const userId=id(`user:${n}`); users.push(userId);
@@ -48,7 +48,7 @@ export async function seedOperations() {
         VALUES($1,$2,'',$3,$4,$5,$6,$7,$8,$9,$10,1,1,CURRENT_TIMESTAMP)`);
     }
     for (let n=0; n<4; n++) await client.query('INSERT INTO venues(id,name,area,address,capacity) VALUES($1,$2,$3,$4,60)',
-          [id(`venue:${n}`),`[모의] ${venueNames[n]}`,REGIONS[n],['서울 마포구 합정동 · 가상 식당','서울 송파구 잠실동 · 가상 식당','서울 강남구 논현동 · 가상 식당','서울 종로구 관철동 · 가상 식당'][n]]);
+          [id(`venue:${n}`),venueNames[n],REGIONS[n],['서울 마포구 합정동','서울 송파구 잠실동','서울 강남구 논현동','서울 종로구 관철동'][n]]);
         const cohorts = [
           {day:-21, count:6, state:'past'}, {day:-14,count:6,state:'past'}, {day:-7,count:6,state:'past'},
           {day:1,count:6,state:'confirmed'}, {day:3,count:6,state:'confirmed'}, {day:5,count:6,state:'confirmed'},
@@ -60,7 +60,7 @@ export async function seedOperations() {
           const cohort=cohorts[n], eventId=id(`event:${n}`), start=at(cohort.day), end=new Date(start.getTime()+7200000);
           const deadline=new Date((cohort.state==='waiting'||cohort.state==='refund')?start.getTime()-172800000:Date.now()-60000);
           await client.query(`INSERT INTO events(id,title,starts_at,ends_at,application_deadline,area,capacity,price_cents,created_by,venue_id,is_demo) VALUES($1,$2,$3,$4,$5,$6,24,8000,$7,$8,TRUE)`,
-            [eventId,`[모의] ${REGIONS[n%4]} ${['취향을 나누는 저녁','여행 이야기 식탁','퇴근 후 새로운 만남'][n%3]}`,start,end,deadline,REGIONS[n%4],adminId,id(`venue:${n%4}`)]);
+            [eventId,`${REGIONS[n%4]} ${['취향을 나누는 저녁','여행 이야기 식탁','퇴근 후 새로운 만남'][n%3]}`,start,end,deadline,REGIONS[n%4],adminId,id(`venue:${n%4}`)]);
       const members = Array.from({length:cohort.count},(_,i)=>users[(n*6+i)%48]);
       if ([0,3,6].includes(n)) viewers.rows.slice(0,2).forEach((v,i)=>{members[i]=v.id;});
       const applications: string[]=[];
@@ -73,7 +73,7 @@ export async function seedOperations() {
         await client.query("INSERT INTO payments(id,application_id,idempotency_key,status,amount_cents,provider,created_at) VALUES($1,$2,$3,'PAID',$4,'MOCK',$5)",[pay,app,`mock-payment:${app}`,amount,created]);
         await client.query('INSERT INTO entitlements(id,user_id,source_payment_id,original_uses,remaining_uses,expires_at) VALUES($1,$2,$3,$4,$5,$6)',[grant,members[i],pay,uses,uses-1,three?new Date(Date.now()+45*86400000):null]);
         await client.query("INSERT INTO entitlement_entries(entitlement_id,application_id,entry_type) VALUES($1,$2,'USE')",[grant,app]);
-        await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by,created_at) VALUES($1,$2,$3,'IN_APP','SENT',$4,$5)`,[eventId,members[i],`[모의] 참가 신청과 ${amount.toLocaleString('ko-KR')}원 모의 결제가 완료되었어요.`,adminId,created]);
+        await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by,created_at) VALUES($1,$2,$3,'IN_APP','SENT',$4,$5)`,[eventId,members[i],`참가 신청과 ${amount.toLocaleString('ko-KR')}원 결제가 완료되었어요.`,adminId,created]);
         applications.push(app); applicationCount++;
       }
       if (['past','confirmed','unmatched'].includes(cohort.state)) {
@@ -110,7 +110,7 @@ export async function seedOperations() {
           await client.query("UPDATE applications SET status='CANCELED',matching_status='NO_MATCH' WHERE id=$1",[app]);
           await client.query("UPDATE payments SET status='REFUNDED' WHERE id=$1",[payment]);
           await client.query('UPDATE entitlements SET remaining_uses=0 WHERE source_payment_id=$1',[payment]);
-          await client.query(`INSERT INTO resolution_cases(id,application_id,status,version,reason,alternatives,selected_choice,result_payload) VALUES($1,$2,'REFUNDED',1,'[모의] 일정 변경에 따른 환불','[]','REFUND',$3)`,[resolution,app,json({status:'REFUND',source:'DEMO'})]);
+          await client.query(`INSERT INTO resolution_cases(id,application_id,status,version,reason,alternatives,selected_choice,result_payload) VALUES($1,$2,'REFUNDED',1,'일정 변경에 따른 환불','[]','REFUND',$3)`,[resolution,app,json({status:'REFUND',source:'DEMO'})]);
           await client.query(`INSERT INTO refund_requests(id,resolution_id,payment_id,request_key,amount_cents,status) VALUES($1,$2,$3,$4,$5,'COMPLETED')`,[id(`refund:${i}`),resolution,payment,`refund:${resolution}`,amount]);
         }
       }

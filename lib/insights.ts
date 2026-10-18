@@ -45,6 +45,6 @@ export async function feedbackInsights(client:Pick<QueryClient,'query'>,source:I
  for(const row of support){categories[row.category]=(categories[row.category]??0)+1;if(row.first_response_at){responseHours+=(new Date(row.first_response_at).getTime()-new Date(row.created_at).getTime())/3600000;responseCount++;}}
  const improvements=(await client.query('SELECT i.id,i.title,i.status,count(l.ticket_id) linked_tickets FROM improvement_items i LEFT JOIN improvement_tickets l ON l.item_id=i.id GROUP BY i.id,i.title,i.status ORDER BY i.created_at DESC LIMIT 20')).rows;
  return {source,from,to,metrics,latest:latest.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20),support:{count:support.length,categories,averageFirstResponseHours:responseCount?responseHours/responseCount:null,unresolved:support.filter(r=>r.status!=='RESOLVED').length},improvements,
-  insufficientData:metrics.filter(m=>m.source==='real'&&m.feedbackCount>=3).length<2,
+  insufficientData:metrics.filter(m=>(source==='all'||m.source===source)&&m.feedbackCount>=3).length<2,
   note:'재참여 의향과 실제 재신청은 별도 지표입니다. 정책별 차이는 표본·기간·참가자 구성이 달라 원인으로 단정할 수 없습니다.'};
 }

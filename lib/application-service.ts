@@ -95,7 +95,7 @@ export async function submitApplication(userId: string, body: Submission) {
     );
     if (duplicate.rowCount) throw new Error('이미 신청한 저녁이 포함되어 있습니다.');
 
-    if(new Set(events.rows.map(e=>Boolean(e.is_demo))).size>1)throw new Error('실제 회차와 모의 회차는 따로 신청해 주세요.');
+    if(new Set(events.rows.map(e=>Boolean(e.is_demo))).size>1)throw new Error('선택하신 일정은 함께 신청할 수 없습니다. 일정을 나누어 신청해 주세요.');
     const demoUser=(await client.query('SELECT is_demo FROM users WHERE id=$1',[userId])).rows[0]?.is_demo;
     const application = await client.query(
       `INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents,is_demo)

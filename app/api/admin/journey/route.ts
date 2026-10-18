@@ -39,8 +39,8 @@ export async function GET(request: Request) {
     metrics: [
       { label: '누적 신청', value: Number(c.total), numerator: Number(c.total), denominator: Number(c.total) },
       { label: '매칭 확정', value: Number(c.confirmed), numerator: Number(c.confirmed), denominator: Number(c.total) },
-      { label: '모의 결제 매출', value: `₩${finance.paid.toLocaleString('ko-KR')}` },
-      { label: '모의 환불 완료', value: `₩${finance.refunded.toLocaleString('ko-KR')}` },
+      { label: '참가권 결제액', value: `₩${finance.paid.toLocaleString('ko-KR')}` },
+      { label: '환불 완료', value: `₩${finance.refunded.toLocaleString('ko-KR')}` },
       { label: '환불 처리 대기', value: `₩${finance.refundPending.toLocaleString('ko-KR')}` },
     ], tables: tables.rows, exceptions: exceptions.rows, reports: reports.rows, attendance: attendance.rows,
     notifications: notifications.rows, feedback: feedback.rows, jobs: jobs.rows,

@@ -35,5 +35,23 @@ test('operations demo is transactional, repeat-safe, and feeds actual participan
     const journey=await import('../app/api/journey/route');
     const own=await (await journey.GET(new Request('http://localhost/api/journey',{headers:{cookie:`todaytable_session=${viewerToken}`}}))).json();
     assert.equal(own.applications.length,3); assert.equal(own.history.length,1); assert.equal(own.upcoming.length,1); assert.ok(own.notifications.length>0); assert.ok(own.entitlements.length>0);
+    const {provisionOperators}=await import('../scripts/provision-operators');
+    await provisionOperators();
+    await db.query("INSERT INTO support_tickets(id,number,user_id,contact_name,subject,category,tags,status,is_demo) VALUES('d3cf2751-c68e-40c2-b1c6-948aca612be1','legacy-content',$1,'참가자','[모의] 운영 배포 확인','OTHER','[]','RESOLVED',true)",[viewer]);
+    await db.query("INSERT INTO support_messages(id,ticket_id,author_user_id,author_name,kind,body,request_key) VALUES('legacy-message','d3cf2751-c68e-40c2-b1c6-948aca612be1',$1,'참가자','PUBLIC','모의 검증 문의','legacy-request')",[viewer]);
+    const {populateShowcase}=await import('../scripts/populate-showcase');
+    const populated=await populateShowcase();assert.equal(populated.created,true);assert.equal(populated.tickets,24);
+    const ticketCounts=(await db.query<any>('SELECT status,count(*) n FROM support_tickets GROUP BY status')).rows;
+    assert.equal(ticketCounts.length,4);assert.ok(ticketCounts.every(r=>Number(r.n)===(r.status==='RESOLVED'?7:6)));
+    assert.equal((await db.query("SELECT 1 FROM support_messages WHERE kind='INTERNAL'")).rowCount,18);
+    assert.equal((await db.query('SELECT 1 FROM feedback_details')).rowCount,15);
+    assert.equal((await populateShowcase()).created,false);
+    assert.equal((await db.query('SELECT 1 FROM support_tickets')).rowCount,25);
+    assert.equal((await db.query("SELECT 1 FROM events WHERE title LIKE '%모의%' OR title LIKE '%DEMO%'")).rowCount,0);
+    assert.equal((await db.query("SELECT 1 FROM venues WHERE name LIKE '%모의%' OR address LIKE '%가상%'")).rowCount,0);
+    assert.equal((await db.query("SELECT 1 FROM support_tickets WHERE subject LIKE '%모의%'")).rowCount,0);
+    assert.equal((await db.query("SELECT 1 FROM support_messages WHERE body LIKE '%모의%'")).rowCount,0);
+    assert.equal((await db.query('SELECT 1 FROM events WHERE is_demo=true')).rowCount,12);
+    assert.equal((await db.query('SELECT 1 FROM provided_data.datasets',[],"SELECT 1 FROM source_data_datasets")).rowCount,0);
   } finally {await db.end(); await rm(dir,{recursive:true,force:true});}
 });
