@@ -1,18 +1,20 @@
 'use client';
 
-import {useEffect, useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
 
 export function ReviewIntro() {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(false);
   const dismiss = () => {
     try { sessionStorage.setItem('todaytable-review-intro-v1', 'seen'); } catch {}
-    dialog.current?.close();
+    setOpen(false);
   };
   useEffect(() => {
     let seen = false;
     try { seen = sessionStorage.getItem('todaytable-review-intro-v1') === 'seen'; } catch {}
-    if (!seen && !dialog.current?.open) dialog.current?.showModal();
+    if (!seen) setOpen(true);
   }, []);
+  if (!open) return null;
   return <dialog ref={dialog} className="review-intro" aria-labelledby="review-intro-title" aria-describedby="review-intro-description" onCancel={dismiss} onKeyDown={event => { if (event.key === 'Tab') { event.preventDefault(); dialog.current?.querySelector('button')?.focus(); } }}>
     <div className="eyebrow">WELCOME TO TODAYTABLE</div>
     <h2 id="review-intro-title">우연한 식탁을 둘러보세요</h2>
