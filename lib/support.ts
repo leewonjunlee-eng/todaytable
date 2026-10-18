@@ -52,7 +52,7 @@ export async function createTicket(who:SupportIdentity,b:any) {
  if(!(Object.hasOwn(SUPPORT_CATEGORIES,b.category))||typeof b.subject!=='string'||b.subject.trim().length<2||b.subject.length>160||typeof b.body!=='string'||!b.body.trim()||b.body.length>5000)problem('문의 유형과 제목, 내용을 확인해 주세요.');
  const name=who.user?(await db.query<any>('SELECT display_name FROM profiles WHERE user_id=$1',[who.user.id])).rows[0]?.display_name??'참가자':String(b.name??'').trim();
  const email=who.user?.email??String(b.email??'').trim();
- if(!name||name.length>60||email.length>254||!/^\S+@\S+\.\S+$/.test(email))problem('이름과 이메일을 확인해 주세요.');
+ if(!name||name.length>60||email.length>254||(!who.user&&!/^\S+@\S+\.\S+$/.test(email)))problem('이름과 이메일을 확인해 주세요.');
  const client=await db.connect();try{
   await client.query('BEGIN');
   if(databaseProvider==='postgres')await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[`support-create:${who.actorKey}`]);

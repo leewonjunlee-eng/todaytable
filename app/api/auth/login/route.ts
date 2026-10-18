@@ -8,9 +8,9 @@ export async function POST(request: Request) {
     if (!sameOrigin(request)) return NextResponse.json({ error: '요청 출처를 확인할 수 없습니다.' }, { status: 403 });
     requireSecret();
     const body=await request.json();
-    if (typeof body.email!=='string' || typeof body.password!=='string' || body.password.length>200) return NextResponse.json({error:'이메일과 비밀번호를 입력해 주세요.'},{status:400});
+    if (typeof body.email!=='string' || typeof body.password!=='string' || body.password.length>200) return NextResponse.json({error:'아이디와 비밀번호를 입력해 주세요.'},{status:400});
     const {rows}=await db.query<{id:string;email:string;role:string;password_hash:string}>('SELECT id,email,role,password_hash FROM users WHERE email=$1',[body.email.trim().toLowerCase()]);
-    if (!rows[0] || !(await verifyPassword(body.password,rows[0].password_hash))) return NextResponse.json({error:'이메일 또는 비밀번호를 확인해 주세요.'},{status:401});
+    if (!rows[0] || !(await verifyPassword(body.password,rows[0].password_hash))) return NextResponse.json({error:'아이디 또는 비밀번호를 확인해 주세요.'},{status:401});
     const token=newSessionToken();
     await db.query(
       'INSERT INTO sessions(user_id,token_hash,expires_at) VALUES($1,$2,now()+interval \'7 days\')',

@@ -71,11 +71,11 @@
 
 | 운영자 | 계정 | 역할 |
 | --- | --- | --- |
-| A | `operator@todaytable.local` | 총괄 OWNER, 기존 계정·비밀번호 보존 |
-| B | `operator2@todaytable.local` | OPERATOR, 신규 |
-| C | `operator3@todaytable.local` | OPERATOR, 신규 |
+| 대표 | `ceo@todaytable` | 총괄 OWNER |
+| PD | `pd@todaytable` | 운영 OPERATOR |
+| CTO | `cto@todaytable` | 운영 OPERATOR |
 
-신규 B/C의 비밀번호는 로컬 보호 파일 `.data/production-operator-credentials.json`에 있습니다. Git/배포에는 포함하지 않았습니다. 실제 돈은 이동하지 않습니다.
+사용자 로그인은 `user@todaytable`입니다. 2026-10-18 사용자 요청에 따라 기존 네 계정의 ID와 비밀번호를 간단하게 정리합니다. 기존 사용자 UUID와 신청·식탁·문의 연결은 보존하며, 변경한 네 계정의 기존 세션은 종료합니다. 운영자 표시는 대표·PD·CTO로 바꾸고 대표의 총괄 권한을 유지합니다. 현재 로그인 정보는 보호 파일 `.data/simple-login-credentials.json`에 보관하며 Git/배포에는 포함하지 않습니다. `scripts/simplify-login-accounts.ts`는 대상 계정 충돌을 확인하고 한 트랜잭션에서 변경합니다. 로그인 화면은 짧은 ID를 받으며, 로그인한 참가자의 문의 접수도 이를 허용합니다.
 
 ## 데이터 보존과 정리
 

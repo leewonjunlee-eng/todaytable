@@ -10,7 +10,7 @@
 
 [현재 현황과 우선순위](docs/STATUS.md) · [문서 안내](docs/README.md) · [제품 확장 계획](docs/PRODUCT_EVOLUTION_PLAN.md) · [배포 방법](DEPLOY.md)
 
-운영 사이트: https://todaytable-production.up.railway.app · 새 운영자 B/C의 계정 정보는 Git에 제외된 `.data/production-operator-credentials.json`에 보관되어 있습니다.
+운영 사이트: https://todaytable-production.up.railway.app · 로그인 계정은 대표 `ceo@todaytable`, PD `pd@todaytable`, CTO `cto@todaytable`, 사용자 `user@todaytable`입니다. 비밀번호는 Git에서 제외한 `.data/simple-login-credentials.json`에 보관합니다.
 
 ## 로컬 개발
 

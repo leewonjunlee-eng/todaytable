@@ -31,7 +31,7 @@ export function LoginForm() {
 
   return (
     <form onSubmit={submit} className="form-stack">
-      <label>이메일<input name="email" type="email" autoComplete="username" required placeholder="you@example.com" /></label>
+      <label>아이디<input name="email" type="text" inputMode="email" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} required placeholder="user@todaytable" /></label>
       <label>비밀번호<input name="password" type="password" autoComplete="current-password" required /></label>
       {error && <p className="form-error">{error}</p>}
       <button className="button primary full" disabled={busy}>{busy ? '확인 중…' : '로그인'} <span>→</span></button>
