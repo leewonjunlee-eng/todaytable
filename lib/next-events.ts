@@ -1,4 +1,5 @@
 import {db,type QueryClient} from './db';
+import {activeShowcase} from './showcase';
 import {REGIONS} from './domain';
 import {parseJson} from './operators';
 
@@ -21,7 +22,8 @@ export async function nextEvents(userId:string,limit=3,client:Pick<QueryClient,'
  const interests=parseJson<string[]>(confirmed?preference.rows[0]?.interests:profile.rows[0]?.interests,[]);
  const atmosphere=confirmed?preference.rows[0]?.atmosphere:null;
  const learning=preference.rows[0]?.learning_enabled!==false&&preference.rows[0]?.learning_enabled!==0;
- const scored=events.rows.filter(e=>(REGIONS as readonly string[]).includes(e.area)&&!selected.has(e.id)&&!booked.rows.some(b=>new Date(b.starts_at).getTime()<new Date(e.ends_at??new Date(new Date(e.starts_at).getTime()+7200000)).getTime()&&new Date(e.starts_at).getTime()<new Date(b.ends_at??new Date(new Date(b.starts_at).getTime()+7200000)).getTime())).map(e=>{
+ const showcase=await activeShowcase(client);
+ const scored=events.rows.filter(e=>(!showcase||showcase.summary.eventIds.includes(e.id))&&(REGIONS as readonly string[]).includes(e.area)&&!selected.has(e.id)&&!booked.rows.some(b=>new Date(b.starts_at).getTime()<new Date(e.ends_at??new Date(new Date(e.starts_at).getTime()+7200000)).getTime()&&new Date(e.starts_at).getTime()<new Date(b.ends_at??new Date(new Date(b.starts_at).getTime()+7200000)).getTime())).map(e=>{
   let score=0;const reasons:string[]=[];
   const areaHistory=history.filter(p=>p.area===e.area),areaChoices=recentChoices.filter(c=>c.area===e.area);
   if(areaHistory.length){score+=Math.min(areaHistory.length,3)*12;reasons.push('이전에 참석한 지역의 일정이에요.');}else if(areaChoices.length){score+=Math.min(areaChoices.length,3)*5;reasons.push('이전에 선택한 지역을 반영했어요.');}

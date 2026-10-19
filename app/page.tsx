@@ -1,18 +1,5 @@
-import {REGIONS} from '@/lib/domain';
 import {currentUser} from '@/lib/auth';
 import {OperationsAnalytics} from '@/components/operations-analytics';
-import {HomeJourney} from '@/components/journey-pages';
-import {SiteNav} from '@/components/site-nav';
-import Link from 'next/link';
+import {DiscoverView} from '@/components/meeting-experience';
 export const dynamic='force-dynamic';
-export default async function Home(){
- const user=await currentUser();if(user)return user.role==='ADMIN'?<OperationsAnalytics/>:<HomeJourney/>;
-
- return <><SiteNav loggedIn={false}/><main className="public-home">
-  <section className="landing"><div className="landing-copy"><div className="eyebrow">A TABLE FOR NEW STORIES</div><h1>낯선 저녁이<br/>좋은 이야기로.</h1><p>취향과 가능한 날·지역을 알려주세요.<br/>함께 대화하기 좋은 4~6명의 식탁을 준비할게요.</p><div className="button-row"><Link className="button primary" href="/apply">나의 첫 식탁 찾기 →</Link><Link className="button quiet" href="/support">궁금한 점 문의하기</Link></div><div className="landing-note">작은 모임 · 새로운 대화 · 우연한 식탁</div></div><figure className="landing-photo"><img src="/dining-editorial.webp" width="1200" height="800" alt="따뜻한 햇빛 아래 도자기 그릇과 리넨이 놓인 작은 원목 식탁" fetchPriority="high"/><figcaption><span>GOOD COMPANY, SLOW EVENINGS</span><strong>오늘의 저녁에, 새로운 이야기를.</strong></figcaption></figure></section>
-  <section className="public-section"><div className="eyebrow">HOW WE MEET</div><h2>일정을 고르면, 만남은 함께 준비해요.</h2><ol className="meeting-steps"><li><span>01</span><h3>나를 조금 알려주기</h3><p>가능한 날짜와 지역, 관심사와 대화 취향을 등록해요.</p></li><li><span>02</span><h3>어울리는 식탁 기다리기</h3><p>공통 관심사와 가능한 날을 살펴 추천해요. 마감 시 식탁과 식당을 자동으로 준비하고 안내합니다.</p></li><li><span>03</span><h3>편안하게 만나기</h3><p>확정된 장소와 배정 이유를 확인하고, 채팅에서 먼저 인사를 나눠요. 식사 비용은 각자 부담해요.</p></li><li><span>04</span><h3>다음 만남에 마음 보태기</h3><p>좋았던 경험과 다음 선호를 남겨주세요. 확인한 선호로 다음 식탁을 조금씩 다듬어요.</p></li></ol></section>
-  <section className="public-section"><div className="section-title"><div><div className="eyebrow">YOUR NEIGHBORHOOD</div><h2>만나기 편한 곳을 알려주세요</h2></div></div><div className="public-table-grid">{REGIONS.map(area=><Link className="panel public-table-card" key={area} href="/apply"><span className="tag">{area}</span><h3>일상 가까이, 새로운 만남</h3><p>오실 수 있는 지역과 날짜를 함께 골라주세요.</p><small>저녁 7시 30분 · 4~6명의 작은 식탁</small><span className="inline-link">가능한 날과 지역 고르기 →</span></Link>)}</div></section>
-  <section className="public-section curation-example"><div><div className="eyebrow">WHY THIS TABLE</div><h2>함께할 이유를,<br/>작은 키워드로.</h2><p>가능한 날과 지역, 서로의 공통 관심사를 살펴 식탁을 준비해요. 확정 안내에서는 어떤 취향이 우리를 이어줬는지 한눈에 확인할 수 있어요.</p></div><article className="example-table curation-reason-card"><span className="tag">나와 이어지는 취향</span><h3>책 이야기에서 시작해,<br/>다음 여행까지.</h3><div className="curation-keywords"><span>독서·글쓰기</span><span>여행</span><span>차분한 대화</span></div><div className="reason-card-context"><strong>같은 날 · 같은 지역</strong><p>함께 이야기할 공통 관심사로 연결된 작은 식탁</p></div><p className="muted">식탁이 확정되면 날짜·시간·식당과 함께 나에게 맞춘 키워드가 도착해요.</p></article></section>
-  <section className="public-section public-faq"><div className="eyebrow">BEFORE WE MEET</div><h2>처음이라 궁금한 이야기</h2><details><summary>사람이나 식탁을 직접 고르나요?</summary><p>가능한 일정과 취향을 등록하면 시스템이 조건에 맞는 식탁을 준비합니다. 특정 사람을 직접 선택하는 방식이 아닙니다.</p></details><details><summary>매칭되지 않으면 어떻게 되나요?</summary><p>가능한 날짜 안에서 어울리는 식탁을 준비하고, 확정되면 알림으로 알려드려요. 매칭이 성사되지 않으면 대체 일정으로 이동하거나 참가권 보관·환불을 선택할 수 있어요.</p></details><details><summary>식사 비용은 어떻게 하나요?</summary><p>참가권과 식사 비용은 별도입니다. 식사 비용은 식당에서 각자 부담하며, 장소와 예상 식사 예산은 확정된 식탁에서 확인할 수 있어요.</p></details><details><summary>운영팀 답변은 어디에서 확인하나요?</summary><p>문의함에서 답변과 상태를 확인하고 추가 질문을 이어갈 수 있어요. 비회원 문의는 접수한 브라우저에서 확인합니다.</p><Link href="/support">문의함 열기 →</Link></details><div className="button-row"><Link className="button primary" href="/apply">가능한 날과 지역 알려주기</Link><Link className="button quiet" href="/support?new=1">운영팀에 물어보기</Link></div></section>
- </main><footer className="public-footer">우연한 식탁 · 서로의 이야기가 머무는 곳 <Link href="/support">문의</Link> · <Link href="/privacy">개인정보 안내</Link></footer></>;
-}
+export default async function Home(){const user=await currentUser();return user?.role==='ADMIN'?<OperationsAnalytics/>:<DiscoverView loggedIn={Boolean(user)}/>;}

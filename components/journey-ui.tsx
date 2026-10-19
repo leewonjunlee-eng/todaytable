@@ -128,7 +128,7 @@ export function JourneyLayout({
   return (
     <>
       <SiteNav admin={Boolean(eyebrow?.startsWith('ADMIN'))} loggedIn={loggedIn} focus={focus} back={back} focusTitle={title}/>
-      <main className={`page evolution-page ${eyebrow?.startsWith('ADMIN')?'admin-page':'participant-page'} ${focus?'focus-page':''}`}>
+      <main id="main-content" className={`page evolution-page ${eyebrow?.startsWith('ADMIN')?'admin-page':'participant-page'} ${focus?'focus-page':''}`}>
         {focus&&<Link className="back-link" href={back}>← 돌아가기</Link>}
         <div className="page-heading">
           {eyebrow && <div className="eyebrow">{eyebrow}</div>}

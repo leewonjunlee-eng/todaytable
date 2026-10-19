@@ -16,14 +16,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const rawAfter = new URL(request.url).searchParams.get('after');
   const parsedAfter = rawAfter ? Date.parse(rawAfter) : Number.NaN;
   const after = Number.isFinite(parsedAfter) ? new Date(parsedAfter).toISOString() : null;
-  const rows = await db.query(`SELECT m.id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
+  const rows = await db.query(`SELECT m.id,m.author_user_id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
     FROM journey_messages m JOIN journey_rooms r ON r.id=m.room_id LEFT JOIN profiles p ON p.user_id=m.author_user_id
     WHERE r.table_id=$1 AND ($2::timestamptz IS NULL OR m.created_at>$2::timestamptz)
-    ORDER BY m.created_at,m.id LIMIT 200`, [id, after], `SELECT m.id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
+    ORDER BY m.created_at,m.id LIMIT 200`, [id, after], `SELECT m.id,m.author_user_id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
     FROM journey_messages m JOIN journey_rooms r ON r.id=m.room_id LEFT JOIN profiles p ON p.user_id=m.author_user_id
     WHERE r.table_id=$1 AND ($2 IS NULL OR m.created_at>$2) ORDER BY m.created_at,m.id LIMIT 200`);
-  const state = await db.query<{ status: string }>(`SELECT status FROM dining_tables WHERE id=$1`, [id]);
-  return NextResponse.json({ messages: rows.rows, can_post: state.rows[0]?.status === 'CONFIRMED' });
+  const state=await db.query<any>('SELECT t.status,e.title,e.ends_at FROM dining_tables t JOIN events e ON e.id=t.event_id WHERE t.id=$1',[id]);
+  return NextResponse.json({currentUserId:user.id,title:state.rows[0]?.title,messages:rows.rows,can_post:state.rows[0]?.status==='CONFIRMED'&&(!state.rows[0]?.ends_at||+new Date(state.rows[0].ends_at)>Date.now())});
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -31,8 +31,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
   if (!sameOrigin(request)) return NextResponse.json({ error: '요청 출처를 확인할 수 없습니다.' }, { status: 403 });
   if (!isCanonicalUuid(id) || !(await member(id, user.id))) return NextResponse.json({ error: '테이블을 찾을 수 없습니다.' }, { status: 404 });
-  const state = await db.query<{ status: string }>(`SELECT status FROM dining_tables WHERE id=$1`, [id]);
-  if (state.rows[0]?.status !== 'CONFIRMED') return NextResponse.json({ error: '현재 채팅을 사용할 수 없습니다.' }, { status: 409 });
+  const state=await db.query<any>('SELECT t.status,e.title,e.ends_at FROM dining_tables t JOIN events e ON e.id=t.event_id WHERE t.id=$1',[id]);
+  if (state.rows[0]?.status !== 'CONFIRMED'||(state.rows[0]?.ends_at&&+new Date(state.rows[0].ends_at)<=Date.now())) return NextResponse.json({ error: '현재 채팅을 사용할 수 없습니다.' }, { status: 409 });
   const body = await request.json().catch(() => ({}));
   if (typeof body.body !== 'string' || !body.body.trim() || body.body.length > 2000 || !isCanonicalUuid(body.requestKey)) return NextResponse.json({ error: '메시지 형식이 올바르지 않습니다.' }, { status: 400 });
   const room = await db.query<{ id: string }>('SELECT id FROM journey_rooms WHERE table_id=$1', [id]);

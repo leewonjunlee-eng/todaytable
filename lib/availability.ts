@@ -1,3 +1,4 @@
+import {activeShowcase} from './showcase';
 import {checkoutGate} from './checkout';
 import {randomUUID} from 'node:crypto';
 import {db,databaseProvider} from './db';
@@ -52,5 +53,6 @@ export async function participantAvailability(userId:string){
 
 export async function recruitingEvents(client:Pick<import('./db').QueryClient,'query'>=db){
  const rows=(await client.query<any>("SELECT id,title,area,starts_at,ends_at,application_deadline,capacity FROM events WHERE status='OPEN' AND application_deadline>now() AND starts_at>now() ORDER BY starts_at,id")).rows;
- return rows.map(e=>({...e,day:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(e.starts_at))}));
+ const showcase=await activeShowcase(client);
+ return rows.filter(e=>!showcase||showcase.summary.eventIds.includes(e.id)).map(e=>({...e,day:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(e.starts_at))}));
 }

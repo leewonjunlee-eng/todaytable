@@ -1,3 +1,4 @@
+import {showcaseTickets} from './showcase';
 import { randomUUID, createHash, createHmac } from 'node:crypto';
 import { db, databaseProvider, type QueryClient } from './db';
 import { apiUser, type AuthUser } from './auth';
@@ -44,7 +45,7 @@ export async function listSupport(who:SupportIdentity) {
  const operators=who.operator?(await db.query('SELECT user_id,display_name,team_role,avatar_color FROM operator_profiles WHERE active=true ORDER BY created_at')).rows:[];
  const templates=who.operator?(await db.query('SELECT * FROM support_templates ORDER BY title')).rows:[];
  const improvements=who.operator?(await db.query(`SELECT i.*, (SELECT count(*) FROM improvement_tickets it WHERE it.item_id=i.id) request_count FROM improvement_items i ORDER BY i.created_at DESC`)).rows:[];
- return {authenticated:Boolean(who.user),tickets:tickets.rows.map(t=>({...t,tags:parseJson(t.tags,[]),...(!who.operator?{contact_email:undefined,visitor_id:undefined,assignee_id:undefined,assignee_name:undefined}:{} )})),operators,templates,improvements,me:who.operator?{id:who.operator.id,name:who.operator.display_name,role:who.operator.team_role}:null};
+ return {authenticated:Boolean(who.user),tickets:(who.operator?await showcaseTickets(tickets.rows):tickets.rows).map(t=>({...t,tags:parseJson(t.tags,[]),...(!who.operator?{contact_email:undefined,visitor_id:undefined,assignee_id:undefined,assignee_name:undefined}:{} )})),operators,templates,improvements,me:who.operator?{id:who.operator.id,name:who.operator.display_name,role:who.operator.team_role}:null};
 }
 export async function createTicket(who:SupportIdentity,b:any) {
  if(!who.user&&!who.visitorId)problem('접수 정보를 확인해 주세요.');

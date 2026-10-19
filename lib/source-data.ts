@@ -4,7 +4,7 @@ import { databaseProvider, db, type QueryClient } from './db';
 export type SourceResponse = {
   dataset_sha256: string; sheet_name: string; sheet_row: number;
   raw_values: string[]; fields: Record<string, string>; issues: string[];
-  conversion?: { user_id: string; event_id: string; application_id: string; payment_id: string; assumptions: Record<string, unknown> } | null;
+  conversion?: { user_id: string; event_id: string; application_id: string; payment_id: string; assumptions: Record<string, unknown>;showcase?:boolean } | null;
 };
 
 function parse<T>(value: T | string): T {
@@ -12,21 +12,20 @@ function parse<T>(value: T | string): T {
 }
 
 export async function listSourceResponses({ q = '', issue = '', page = 1, pageSize = 30 }: { q?: string; issue?: string; page?: number; pageSize?: number }) {
-  const sql = databaseProvider === 'postgres'
-    ? `SELECT r.dataset_sha256,r.sheet_name,r.sheet_row,r.raw_values,r.fields,r.issues,
-         c.user_id,c.event_id,c.application_id,c.payment_id,c.assumptions
-       FROM provided_data.survey_responses r LEFT JOIN source_demo_conversions c
-       USING(dataset_sha256,sheet_name,sheet_row) ORDER BY r.sheet_row`
-    : `SELECT r.dataset_sha256,r.sheet_name,r.sheet_row,r.raw_values,r.fields,r.issues,
-         c.user_id,c.event_id,c.application_id,c.payment_id,c.assumptions
-       FROM source_data_responses r LEFT JOIN source_demo_conversions c
-       USING(dataset_sha256,sheet_name,sheet_row) ORDER BY r.sheet_row`;
+  const sourceTable=databaseProvider==='postgres'?'provided_data.survey_responses':'source_data_responses';
+  const sql=`SELECT r.dataset_sha256,r.sheet_name,r.sheet_row,r.raw_values,r.fields,r.issues,
+   COALESCE(sc.user_id,c.user_id) user_id,COALESCE(sc.event_id,c.event_id) event_id,
+   COALESCE(sc.application_id,c.application_id) application_id,COALESCE(sc.payment_id,c.payment_id) payment_id,
+   COALESCE(sc.assumptions,c.assumptions) assumptions,CASE WHEN sc.user_id IS NOT NULL THEN true ELSE false END showcase
+   FROM ${sourceTable} r LEFT JOIN source_demo_conversions c USING(dataset_sha256,sheet_name,sheet_row)
+   LEFT JOIN showcase_members sc ON sc.dataset_sha256=r.dataset_sha256 AND sc.sheet_name=r.sheet_name AND sc.sheet_row=r.sheet_row
+    AND sc.batch_id=(SELECT id FROM showcase_batches WHERE active=true) ORDER BY r.sheet_row`;
   const { rows } = await db.query<any>(sql);
   const query = q.trim().toLocaleLowerCase();
   const filtered: SourceResponse[] = rows.map((row) => ({
     dataset_sha256: row.dataset_sha256, sheet_name: row.sheet_name, sheet_row: Number(row.sheet_row),
     raw_values: parse<string[]>(row.raw_values), fields: parse<Record<string, string>>(row.fields), issues: parse<string[]>(row.issues),
-    conversion: row.user_id ? { user_id: row.user_id, event_id: row.event_id, application_id: row.application_id, payment_id: row.payment_id, assumptions: parse(row.assumptions) } : null,
+    conversion: row.user_id ? { user_id: row.user_id, event_id: row.event_id, application_id: row.application_id, payment_id: row.payment_id, assumptions: parse(row.assumptions),showcase:Boolean(row.showcase) } : null,
   })).filter((row) => (!issue || row.issues.includes(issue)) && (!query || JSON.stringify(row.fields).toLocaleLowerCase().includes(query) || String(row.sheet_row).includes(query)));
   return { total: filtered.length, rows: filtered.slice((page - 1) * pageSize, page * pageSize) };
 }

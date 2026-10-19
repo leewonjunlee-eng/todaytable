@@ -1,4 +1,5 @@
 import {db} from './db';
+import {activeShowcase} from './showcase';
 import {parseJson} from './operators';
 import {sharedInterestKeywords,conversationQuestions} from './table-experience';
 export async function workspaceData(){
@@ -16,6 +17,8 @@ export async function workspaceData(){
   db.query<any>("SELECT a.user_id,ar.status FROM attendance_records ar JOIN applications a ON a.id=ar.application_id"),
   db.query<any>('SELECT target_user_id,decision FROM safety_reports'),
  ]);
+ const showcase=await activeShowcase();
+ if(showcase){const ids=new Set(showcase.summary.eventIds);events.rows=events.rows.filter(e=>ids.has(e.id));const appIds=new Set(options.rows.filter(o=>ids.has(o.event_id)).map(o=>o.application_id));applications.rows=applications.rows.filter(a=>appIds.has(a.id));tables.rows=tables.rows.filter(t=>ids.has(t.event_id));const tableIds=new Set(tables.rows.map(t=>t.id));members.rows=members.rows.filter(m=>tableIds.has(m.table_id));feedback.rows=feedback.rows.filter(f=>tableIds.has(f.table_id));proposals.rows=proposals.rows.filter(p=>ids.has(p.event_id));}
  const byEvent=new Map(events.rows.map((e:any)=>[e.id,e]));
  const enrichedTables=tables.rows.map((t:any)=>{const people=members.rows.filter((m:any)=>m.table_id===t.id),reviews=feedback.rows.filter((f:any)=>f.table_id===t.id);const years=people.map((p:any)=>Number(p.birth_year)).filter(Boolean);const max=years.length?Math.max(...years):null,min=years.length?Math.min(...years):null;
   const event=byEvent.get(t.event_id),tableExplanations=explanations.rows.filter((e:any)=>e.table_id===t.id),snapshot=parseJson<any>(t.matching_snapshot,{});

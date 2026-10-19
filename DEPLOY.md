@@ -1,5 +1,9 @@
 # Todaytable Deployment Guide
 
+## Fictional lifecycle release (029)
+
+Apply migration 029 before the new worker or web runtime. Back up the existing database and immutable source first. Deploy the worker with the active-showcase push guard, then the web, and only then run the lifecycle population against the preserved source dataset. Replaying the same checksum and anchor Thursday creates no duplicates. Keep the current schema and compatible worker when rolling back the web. See [release design](docs/EXPERIENCE_REDESIGN_20261019.md) and [current status](docs/STATUS.md).
+
 ## Railway Deployment
 
 This project is configured for deployment to Railway using Docker. See [current status](docs/STATUS.md) for current verification evidence and active deployment IDs before deploying local changes.

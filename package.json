@@ -17,7 +17,8 @@
     "test:providers": "node tests/provider-harness.mjs",
     "test:render": "TODAYTABLE_IN_PROCESS_TYPESCRIPT=1 node --env-file-if-exists=.env.local scripts/render-smoke.mjs",
     "serve:unix": "node --env-file-if-exists=.env.local scripts/serve-unix.mjs",
-    "db:populate:showcase": "node --env-file-if-exists=.env.local --import tsx scripts/populate-showcase.ts"
+    "db:populate:showcase": "node --env-file-if-exists=.env.local --import tsx scripts/populate-showcase.ts",
+    "db:populate:lifecycle": "node --env-file-if-exists=.env.local --import tsx scripts/populate-lifecycle-showcase.ts"
   },
   "dependencies": {
     "next": "16.4.2",

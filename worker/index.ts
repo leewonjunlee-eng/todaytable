@@ -1,3 +1,4 @@
+import {activeShowcase} from '../lib/showcase';
 import {deliverBusinessEvent,queueBusinessEvent,scheduleRecruitmentAlerts} from '../lib/business-events';
 import { randomUUID } from 'node:crypto';
 import { databaseProvider, db } from '../lib/db';
@@ -194,6 +195,7 @@ export async function processJob(job: Job, owner: string) {
         case 'PUSH_NOTIFICATION': {
           const payload = locked.rows[0].payload as { recipientUserId?: string; message?: string;actionUrl?:string };
           if (!payload.recipientUserId || typeof payload.message !== 'string') throw new Error('PUSH_NOTIFICATION requires recipientUserId/message.');
+          if(await activeShowcase(client))break; // The explicitly activated fictional environment never sends external pushes.
           const subscriptions = await client.query<any>(`SELECT id,subscription FROM push_subscriptions WHERE user_id=$1 AND active=true FOR UPDATE`, [payload.recipientUserId]);
           for (const subscription of subscriptions.rows) {
             const delivery = await client.query<any>(`INSERT INTO push_deliveries(id,job_id,subscription_id,recipient_user_id,status,attempts) VALUES($1,$2,$3,$4,'PENDING',1) ON CONFLICT(job_id,subscription_id) DO UPDATE SET attempts=push_deliveries.attempts+1,status='PENDING' RETURNING id`, [randomUUID(), job.id, subscription.id, payload.recipientUserId]);
