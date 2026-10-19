@@ -1,3 +1,3 @@
-import {redirect} from 'next/navigation';
 import {requireAdmin} from '@/lib/auth';
-export default async function PreviousPage(){await requireAdmin();redirect('/admin/matching/review');}
+import {OperatorExceptions} from '@/components/operator-exceptions';
+export default async function ExceptionsPage(){await requireAdmin();return <OperatorExceptions/>;}

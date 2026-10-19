@@ -83,18 +83,20 @@ export function useJourney(path: string, interval?: number) {
 export function JourneyState({
   loading,
   error,
+  data,
   empty,
   onRefresh,
   children,
 }: {
   loading: boolean;
   error: string;
+  data?: unknown;
   empty?: boolean;
   onRefresh: () => Promise<void>;
   children: ReactNode;
 }) {
   if (loading) return <div className="journey-state" role="status">불러오는 중이에요…</div>;
-  if (error) {
+  if (error && data == null) {
     return (
       <div className="journey-state error-state" role="alert">
         <p>{error}</p>
@@ -103,7 +105,7 @@ export function JourneyState({
     );
   }
   if (empty) return <div className="journey-state"><p>아직 표시할 내용이 없어요.</p></div>;
-  return <>{children}</>;
+  return <>{error&&<div className="notice" role="alert"><p>최신 정보를 불러오지 못했어요. 기존 화면과 입력을 유지했어요. {error}</p><button className="button quiet" type="button" onClick={onRefresh}>다시 시도</button></div>}{children}</>;
 }
 
 export function JourneyLayout({
@@ -142,6 +144,7 @@ export function JourneyLayout({
 }
 
 const statusLabels: Record<string, string> = {
+  SUBMITTED:'신청 완료', PENDING:'결제 대기', MATCHING:'매칭 중', REALLOCATING:'다른 조합 확인 중', ALTERNATIVE_OFFERED:'다음 일정 선택 필요', NO_MATCH:'매칭 종료', EXCEPTION:'운영팀 확인 중', CANCELED:'신청 취소', REFUND_PROCESSING:'환불 처리 중', REFUND_FAILED:'환불 확인 필요',
   WAITING: '매칭 대기', MATCHED: '매칭 완료', CONFIRMED: '식탁 확정',
   TRANSFER: '다른 일정 선택', HOLD: '보류', REFUND: '환불 요청',
   PAID: '결제 완료', ATTENDED: '참석 완료', NO_SHOW_CANDIDATE: '노쇼 확인 대기',
@@ -157,7 +160,7 @@ export function RefreshButton({ onClick }: { onClick: () => Promise<void> }) {
   return <button className="button quiet compact" type="button" onClick={() => void onClick()}>새로고침</button>;
 }
 
-const moneyStatus: Record<string, string> = { PAID: '결제 완료', PENDING: '결제 대기', REFUNDED: '환불 완료', FAILED: '결제 실패' };
+const moneyStatus: Record<string, string> = { PAID: '결제 완료', PENDING: '결제 대기', REFUNDED: '환불 완료', FAILED: '결제 실패', REFUND_AVAILABLE:'환불 선택 가능', REFUND_REQUESTED:'환불 요청', REFUND_PROCESSING:'환불 처리 중', REFUND_FAILED:'환불 확인 필요', CANCELED:'결제 취소' };
 
 export function ApplicationCard({
   application,
@@ -169,7 +172,7 @@ export function ApplicationCard({
   const [saving, setSaving] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState('');
   const resolution = application.resolution;
-  const canAct = resolution && ['OFFERED', 'FAILED'].includes(resolution.status);
+  const canAct = resolution && resolution.selected_choice!=='REFUND' && ['OFFERED', 'FAILED'].includes(resolution.status);
   async function resolve(choice: 'TRANSFER' | 'HOLD' | 'REFUND') {
     if (!onResolution || saving) return;
     if (choice === 'TRANSFER' && !selectedEvent) return;

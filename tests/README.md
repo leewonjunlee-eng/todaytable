@@ -56,3 +56,9 @@ python3 tests/showcase-browser.py --base http://localhost:3101
 ## 성비·회차 참가자 목록
 
 `tests/gender-composition.test.ts`와 자동 매칭 테스트는 허용된 여섯 조합과 승인·취소·충원·프로필 변경 경계를 검사합니다. `python3 tests/gender-browser.py --base <URL> [--credentials <보호 JSON>]`는 실제 설문 294행 연결, 식탁 성비·연령, 네 화면 폭의 참가자 목록과 여러 회차 중복 집계를 확인합니다. 결과는 기본 `.data/gender-browser/`에 저장합니다.
+
+## Opus 교차 검토 회귀 검사 (2026-10-19)
+
+`tests/cross-review-browser.py`는 로컬 운영자 fixture의 세션을 사용합니다. `tests/prepare-operator-browser.ts`를 실행하고 해당 환경 파일로 마지막 production standalone bundle을 제공한 뒤 Python Playwright로 실행합니다. 기본 주소는 `http://127.0.0.1:3326`이며 `--base`, `--out`으로 변경합니다. 결제/환불·장애·동시 편집·병합 상태는 API 응답 통제로 재현하고, 실제 checkout 검증과 예외 목록은 격리 서버 API로 확인합니다. 운영 사이트는 허용하지 않습니다.
+
+`tests/virtual-payments.test.ts`에는 SINGLE/THREE_PASS의 환불 대기·실패 → 직접 취소/HOLD/TRANSFER 차단과 중복 환불 방지가 포함됩니다. `tests/{sqlite,postgres}.integration.test.ts`는 예외 재실패 시 동일 행 재개와 성공 시 해결을 검증합니다. `tests/prd-completion.test.ts`는 성별 미선택 상태의 결제 차단과 유료 신청 후 미선택 변경 거부를 검증합니다. 상세 범위·결과·한계는 [교차 검토 보고서](../docs/CROSS_REVIEW_20261019.md)를 확인하세요.

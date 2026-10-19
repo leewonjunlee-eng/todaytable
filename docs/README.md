@@ -4,6 +4,7 @@
 
 | 목적 | 문서 |
 | --- | --- |
+| PRD·사용자/운영자 흐름 개선·Opus 5.5 반복 교차 검토 | [교차 검토 보고서](CROSS_REVIEW_20261019.md), [Claude 원문](CLAUDE_CROSS_REVIEW_20261019.md) |
 | 화면 개편·가상 설문 294행 전체 활용·GitHub 스킬 | [2026-10-19 경험 개편](EXPERIENCE_REDESIGN_20261019.md) |
 | 성비 필수 조건·회차 참가자 보기 수정 | [성비·목록 수정](GENDER_MATCHING_FIX_20261019.md) |
 | 현재 구현·검증·배포 상태와 다음 작업 | [현재 현황](STATUS.md) |

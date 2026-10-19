@@ -303,6 +303,10 @@ export async function resolveApplication(userId: string, applicationId: string, 
       }
       throw new Error('해결 선택이 이미 처리되었거나 유효하지 않습니다.');
     }
+    if(row.selected_choice==='REFUND'){
+      if(choice!=='REFUND')throw new Error('이미 환불을 선택한 신청은 일정 이동이나 참가권 보관으로 변경할 수 없습니다. 환불 처리 상태를 확인해 주세요.');
+      await client.query('COMMIT');return {status:'REFUND'};
+    }
     if((await client.query("SELECT 1 FROM table_members WHERE application_id=$1 AND status='ACTIVE'",[applicationId])).rowCount)throw new Error('이미 확정된 식탁이 있습니다. 참가 취소 정책을 확인해 주세요.');
     if (['OFFERED','FAILED'].includes(row.status)) {
     const resolutionId = row.id;

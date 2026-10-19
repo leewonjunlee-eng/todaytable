@@ -1,3 +1,4 @@
+import {hasRecruitmentSelection} from './recruitment-selection';
 import {activeShowcase} from './showcase';
 import {checkoutGate} from './checkout';
 import {randomUUID} from 'node:crypto';
@@ -32,7 +33,7 @@ export async function registerAvailability(userId:string,body:any){
   if(body.checkoutId)await checkoutGate(c,userId,body.checkoutId,{...selected,pass:body.pass});
   const open=await recruitingEvents(c);
   const matching=open.filter(e=>selected.dates.includes(e.day)&&selected.areas.includes(e.area));
-  if(selected.dates.some(day=>!matching.some(e=>e.day===day))||selected.areas.some(area=>!matching.some(e=>e.area===area)))problem('선택한 날짜와 지역에 모집 중인 회차가 없어요. 일정을 다시 확인해 주세요.',409);
+  if(!hasRecruitmentSelection(open,selected.dates,selected.areas))problem('선택한 날짜와 지역에 모집 중인 회차가 없어요. 일정을 다시 확인해 주세요.',409);
   const eventIds=matching.map(e=>e.id);
   if(eventIds.length>32)problem('선택한 회차가 너무 많아요. 날짜나 지역을 줄여 주세요.');
   let application;

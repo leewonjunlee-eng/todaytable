@@ -255,6 +255,8 @@ export async function processJob(job: Job, owner: string) {
        lease_owner=NULL,lease_until=NULL,last_error=NULL WHERE id=$1 AND lease_owner=$2`,
       [job.id, owner],
     );
+    const hasExceptions=databaseProvider==='postgres'||(await client.query("SELECT name FROM sqlite_master WHERE type='table' AND name='lifecycle_exceptions'")).rowCount>0;
+    if(hasExceptions)await client.query("UPDATE lifecycle_exceptions SET status='RESOLVED',resolved_at=now() WHERE source='scheduled_job' AND entity_id=$1 AND status IN ('OPEN','RETRYING')",[locked.rows[0].job_key]);
     await client.query('COMMIT');
   } catch (error) {
     if (!(error instanceof PersistedPushFailure)) await client.query('ROLLBACK');
@@ -298,16 +300,20 @@ export async function failJob(job: Job, owner: string, error: unknown) {
       // Keep the compatibility audit even when exception persistence is unavailable.
       await client.query(`INSERT INTO audit_logs(action,entity_type,entity_id,after_data) VALUES('JOB_DEAD_LETTERED','scheduled_job',$1,$2)`, [current.rows[0].job_key, JSON.stringify({ error: message, attempts: current.rows[0].attempts })], `INSERT INTO audit_logs(action,entity_type,entity_id,after_data) VALUES('JOB_DEAD_LETTERED','scheduled_job',$1,$2)`);
       const exceptionTable = databaseProvider === 'postgres' || (await client.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='lifecycle_exceptions'", [], "SELECT name FROM sqlite_master WHERE type='table' AND name='lifecycle_exceptions'")).rowCount > 0;
-      if (exceptionTable) await client.query(
+      if(exceptionTable){
+        const reopened=await client.query("UPDATE lifecycle_exceptions SET status='OPEN',error=$2,resolved_at=NULL,resolved_by=NULL WHERE source='scheduled_job' AND entity_id=$1 AND status IN ('OPEN','RETRYING') RETURNING id",[current.rows[0].job_key,message]);
+        if(!reopened.rowCount)await client.query(
         `INSERT INTO lifecycle_exceptions(id,source,entity_id,error,details) VALUES($1,'scheduled_job',$2,$3,${databaseProvider === 'postgres' ? '$4::jsonb' : '$4'})`,
         [randomUUID(), current.rows[0].job_key, message, JSON.stringify({ attempts: current.rows[0].attempts, jobType: current.rows[0].job_type })],
         `INSERT INTO lifecycle_exceptions(id,source,entity_id,error,details) VALUES($1,'scheduled_job',$2,$3,$4)`,
       );
+      }
       if (current.rows[0].job_type === 'PROCESS_REFUND') {
         const payload = current.rows[0].payload as { resolutionId?: string };
         if (payload?.resolutionId) {
-          await client.query(`UPDATE refund_requests SET status='FAILED',error=$2 WHERE resolution_id=$1`, [payload.resolutionId, message]);
-          await client.query(`UPDATE resolution_cases SET status='FAILED',updated_at=now() WHERE id=$1`, [payload.resolutionId]);
+          await client.query(`UPDATE refund_requests SET status='FAILED',error=$2 WHERE resolution_id=$1 AND status<>'COMPLETED'`, [payload.resolutionId, message]);
+          await client.query(`UPDATE resolution_cases SET status='FAILED',updated_at=now() WHERE id=$1 AND selected_choice='REFUND' AND status IN ('REFUND_REQUESTED','FAILED')`, [payload.resolutionId]);
+          await client.query("UPDATE payments SET status='REFUND_FAILED',updated_at=now() WHERE id IN (SELECT r.payment_id FROM refund_requests r JOIN resolution_cases rc ON rc.id=r.resolution_id WHERE r.resolution_id=$1 AND r.status='FAILED' AND rc.selected_choice='REFUND' AND rc.status='FAILED') AND status<>'REFUNDED'",[payload.resolutionId]);
         }
       }
     }

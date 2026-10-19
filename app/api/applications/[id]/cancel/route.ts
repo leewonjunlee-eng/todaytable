@@ -22,6 +22,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (!found.rowCount) throw Object.assign(new Error('신청을 찾을 수 없습니다.'), { status: 404 });
     const row = found.rows[0];
     if (row.status === 'CANCELED') { await client.query('COMMIT'); return NextResponse.json({ status: 'CANCELED' }); }
+    const resolution=(await client.query<any>('SELECT selected_choice FROM resolution_cases WHERE application_id=$1 FOR UPDATE',[id])).rows[0];
+    if(resolution?.selected_choice==='REFUND'||String(row.payment_status).startsWith('REFUND'))throw new Error('환불 처리 중이거나 환불을 선택한 신청은 취소로 변경할 수 없습니다. 결제·환불 내역을 확인해 주세요.');
     const starts = new Date(row.starts_at); const now = new Date();
     const calendarDay = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
     if (calendarDay(starts) === calendarDay(now)) throw Object.assign(new Error('행사 당일에는 취소할 수 없습니다.'), { status: 400 });
@@ -54,7 +56,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       await client.query(`INSERT INTO refund_requests(id,resolution_id,payment_id,request_key,amount_cents) VALUES($1,$2,$3,$4,$5) ON CONFLICT(resolution_id) DO NOTHING`,[randomUUID(),resolutionId,row.payment_id,`refund:${resolutionId}`,row.amount_cents]);
       await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'PROCESS_REFUND',$2,now()) ON CONFLICT(job_key) DO NOTHING`,[`refund:${resolutionId}`,JSON.stringify({resolutionId})],`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'PROCESS_REFUND',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO NOTHING`);
       refundRequested=true;
-    } else if (cancellationStatus === 'CANCELED_EARLY') {
+    } else if (cancellationStatus === 'CANCELED_EARLY' && (row.payment_status==='PAID'||row.pass_choice==='EXISTING_PASS')) {
       const restored = await client.query<any>(`INSERT INTO entitlement_entries(entitlement_id,application_id,entry_type)
         SELECT own.entitlement_id,$1,'RESTORE' FROM entitlement_entries own
         WHERE own.application_id=$1 AND own.entry_type='USE'

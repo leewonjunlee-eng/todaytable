@@ -1,3 +1,4 @@
+// Payment/entitlement fixtures use a matchable gender so rejection checks reach the wallet rules.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -58,11 +59,11 @@ before(async () => {
     intruderId = intruder.rows[0].id;
     await db.query(
       `INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at)
-       VALUES($1,'No Pass','01000000000',1990,'PREFER_NOT_TO_SAY','INTJ',1,1,CURRENT_TIMESTAMP)`, [intruderId],
+       VALUES($1,'No Pass','01000000000',1990,'MAN','INTJ',1,1,CURRENT_TIMESTAMP)`, [intruderId],
     );
     await db.query(
       `INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at)
-       VALUES($1,'SQLite Test Participant','01012345678',1992,'PREFER_NOT_TO_SAY','ENFJ',1,1,CURRENT_TIMESTAMP)`, [participantId],
+       VALUES($1,'SQLite Test Participant','01012345678',1992,'MAN','ENFJ',1,1,CURRENT_TIMESTAMP)`, [participantId],
     );
     const { tokenHash } = await import('../lib/security');
     participantToken = randomUUID();
@@ -122,7 +123,7 @@ test('actual login, profile, application replay, and entitlement ownership work 
     const domain = await import('../lib/domain');
     const profileBody = {
       name: 'SQLite Test Participant', phone: '010-1234-5678', birthYear: 1990,
-      gender: 'PREFER_NOT_TO_SAY', occupation: 'Tester', mbti: 'INTJ',
+      gender: 'MAN', occupation: 'Tester', mbti: 'INTJ',
       interests: [domain.INTERESTS[0]], traits: [domain.TRAITS[0]],
       desiredTraits: [domain.DESIRED_TRAITS[0]], foodBudgets: ['ANY'],
       dietaryNotes: '', privacy: true, operations: true,
@@ -288,6 +289,23 @@ test('worker processes effects once, recovers leases, and retries unknown work t
     await worker.failJob(second!, 'bad-two', new Error('unknown handler'));
     const dead = await db.query<{status:string;attempts:number}>('SELECT status,attempts FROM scheduled_jobs WHERE id=$1', [bad.rows[0].id]);
     assert.deepEqual(dead.rows[0], {status:'DEAD',attempts:2});
+
+
+    // Operator retries reuse one exception, reopen on repeated failure, and close on success.
+    const exceptionRows=await db.query("SELECT id FROM lifecycle_exceptions WHERE source='scheduled_job' AND entity_id=$1",[first!.job_key]);
+    assert.equal(exceptionRows.rowCount,1);
+    await db.query("UPDATE lifecycle_exceptions SET status='RETRYING' WHERE id=$1",[exceptionRows.rows[0].id]);
+    await db.query("UPDATE scheduled_jobs SET status='PENDING',attempts=0,max_attempts=1,next_attempt_at=CURRENT_TIMESTAMP WHERE id=$1",[bad.rows[0].id]);
+    const repeated=await worker.claimJob('repeat-failure');assert.equal(repeated?.id,bad.rows[0].id);
+    await assert.rejects(worker.processJob(repeated!,'repeat-failure'),/No handler registered/i);
+    await worker.failJob(repeated!,'repeat-failure',new Error('second terminal failure'));
+    const sameException=await db.query("SELECT id,status FROM lifecycle_exceptions WHERE source='scheduled_job' AND entity_id=$1",[first!.job_key]);
+    assert.equal(sameException.rowCount,1);assert.equal(sameException.rows[0].id,exceptionRows.rows[0].id);assert.equal(sameException.rows[0].status,'OPEN');
+    await db.query("UPDATE lifecycle_exceptions SET status='RETRYING' WHERE id=$1",[exceptionRows.rows[0].id]);
+    await db.query("UPDATE scheduled_jobs SET job_type='APPLICATION_RECEIVED',status='PENDING',attempts=0,next_attempt_at=CURRENT_TIMESTAMP WHERE id=$1",[bad.rows[0].id]);
+    const recoveredRetry=await worker.claimJob('fixed-retry');assert.equal(recoveredRetry?.id,bad.rows[0].id);
+    await worker.processJob(recoveredRetry!,'fixed-retry');
+    assert.equal((await db.query("SELECT status FROM lifecycle_exceptions WHERE id=$1",[exceptionRows.rows[0].id])).rows[0].status,'RESOLVED');
 
     await db.end();
     const reopened = await db.query<{display_name:string}>('SELECT display_name FROM profiles WHERE user_id=$1', [participantId]);

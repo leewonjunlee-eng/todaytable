@@ -28,9 +28,20 @@ test('only published recruitment accepts checkout; failures resume and success i
  const invalid=availabilityDays().find(d=>d!==day)!;
  await assert.rejects(registerAvailability(user,{dates:[invalid],areas:['홍대/합정'],pass:'SINGLE',requestKey:randomUUID()}),/모집 중인 회차/);
  assert.equal((await db.query('SELECT 1 FROM payments')).rowCount,0);
- const selection={dates:[day],areas:['홍대/합정'],pass:'SINGLE'},checkout=await openCheckout(user,selection);
+ const selection={dates:[day],areas:['홍대/합정'],pass:'SINGLE'};
+ await db.query("UPDATE profiles SET gender='PREFER_NOT_TO_SAY' WHERE user_id=$1",[user]);
+ await assert.rejects(registerAvailability(user,{...selection,requestKey:randomUUID()}),/성별을 선택/);
+ assert.equal((await db.query('SELECT 1 FROM payments')).rowCount,0,'unmatchable profile must never be charged');
+ await db.query("UPDATE profiles SET gender='WOMAN' WHERE user_id=$1",[user]);
+ const checkout=await openCheckout(user,selection);
  const failed=await registerAvailability(user,{...selection,checkoutId:checkout.id,checkoutOutcome:'FAILED',requestKey:randomUUID()});assert.equal(failed.payment,'FAILED');assert.equal((await resumeCheckout(user))?.status,'FAILED');
  const key=randomUUID(),body={...selection,checkoutId:checkout.id,requestKey:key};const saved=await registerAvailability(user,body);assert.ok(saved.applicationId);assert.equal((await registerAvailability(user,body)).created,false);assert.equal(await resumeCheckout(user),null);await assert.rejects(registerAvailability(user,{...body,requestKey:randomUUID()}),/이미 완료된 결제/);
+ const {tokenHash}=await import('../lib/security'),token=randomUUID();
+ await db.query('INSERT INTO sessions(user_id,token_hash,expires_at) VALUES($1,$2,$3)',[user,tokenHash(token),new Date(Date.now()+3600000)]);
+ const profileRoute=await import('../app/api/profile/route');
+ const change=await profileRoute.PUT(new Request('http://localhost/api/profile',{method:'PUT',headers:{origin:'http://localhost','content-type':'application/json',cookie:`todaytable_session=${token}`},body:JSON.stringify({name:'참가자',phone:'01012345678',birthYear:1995,gender:'PREFER_NOT_TO_SAY',occupation:'',mbti:'ENFP',interests:['음악'],traits:[],desiredTraits:[],foodBudgets:['ANY'],dietaryNotes:'',privacy:true,operations:true})}));
+ assert.equal(change.status,409);assert.ok((await change.json()).fields.gender);
+ assert.equal((await db.query<any>('SELECT gender FROM profiles WHERE user_id=$1',[user])).rows[0].gender,'WOMAN');
  assert.equal((await db.query('SELECT 1 FROM events')).rowCount,1);
  // Registered recruitment, including more distant dates, is the single source of truth.
  const far=(await db.query<any>("INSERT INTO events(title,starts_at,ends_at,application_deadline,area,capacity,price_cents,created_by) VALUES('장기 모집',$1,$2,$3,'홍대/합정',24,8000,$4) RETURNING id",[new Date(Date.now()+90*86400000),new Date(Date.now()+90*86400000+7200000),new Date(Date.now()+89*86400000),admin])).rows[0];

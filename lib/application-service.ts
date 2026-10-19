@@ -61,9 +61,10 @@ export async function submitApplication(userId: string, body: Submission, connec
     }
 
     const profileRow = await client.query(
-      'SELECT birth_year FROM profiles WHERE user_id=$1',
+      'SELECT birth_year,gender FROM profiles WHERE user_id=$1',
       [userId],
     );
+    if (!['MAN','WOMAN'].includes(profileRow.rows[0].gender)) throw new Error('현재 성비 기준으로 매칭하려면 프로필의 성별을 선택해야 해요. 결제 전에 프로필을 수정해 주세요.');
     const currentKstYear = Number(new Intl.DateTimeFormat('en', {
       timeZone: 'Asia/Seoul', year: 'numeric',
     }).format(new Date()));

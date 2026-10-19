@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+// Payment/entitlement fixtures use a matchable gender so rejection checks reach the wallet rules.
 import assert from 'node:assert/strict';
 import type { Client } from 'pg';
 
@@ -98,10 +99,10 @@ test('application replay is concurrency-safe, reuses payment, debits owned passe
   const admin = await client.query(`INSERT INTO users(email,password_hash,role) VALUES($1,'x','ADMIN') RETURNING id`, [`${randomUUID()}@test.invalid`]);
   adminUserId = admin.rows[0].id;
     await client.query("INSERT INTO operator_profiles(user_id,display_name,team_role) VALUES($1,'통합 검증 운영자','OWNER') ON CONFLICT(user_id) DO NOTHING", [adminUserId]);
-  await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Test','01000000000',1990,'PREFER_NOT_TO_SAY','INTJ',true,true,now())`, [userId]);
-  await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Other','01000000001',1990,'PREFER_NOT_TO_SAY','INTJ',true,true,now())`, [otherUser.rows[0].id]);
+  await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Test','01000000000',1990,'MAN','INTJ',true,true,now())`, [userId]);
+  await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Other','01000000001',1990,'MAN','INTJ',true,true,now())`, [otherUser.rows[0].id]);
   const intruder = await client.query(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`${randomUUID()}@test.invalid`]);
-  await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Intruder','01000000002',1990,'PREFER_NOT_TO_SAY','INTJ',true,true,now())`, [intruder.rows[0].id]);
+  await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Intruder','01000000002',1990,'MAN','INTJ',true,true,now())`, [intruder.rows[0].id]);
   const events = await client.query(`INSERT INTO events(title,starts_at,application_deadline,area,capacity,price_cents,created_by) VALUES ('one',now()+interval '1 day',now()+interval '1 hour','홍대',10,8000,$1),('two',now()+interval '2 days',now()+interval '1 hour','강남',10,8000,$1),('three',now()+interval '3 days',now()+interval '1 hour','을지로',10,8000,$1) RETURNING id`, [admin.rows[0].id]);
   const requestKey = randomUUID();
   const concurrent = await Promise.all([
@@ -169,7 +170,7 @@ test('application listing route scopes results to the authenticated participant'
     headers: {cookie: `todaytable_session=${token}`, origin: 'http://localhost', 'content-type': 'application/json'},
     body: JSON.stringify({
       name: 'Profile Route Test', phone: '010-1234-5678', birthYear: 1990,
-      gender: 'PREFER_NOT_TO_SAY', occupation: 'Tester', mbti: 'INTJ',
+      gender: 'MAN', occupation: 'Tester', mbti: 'INTJ',
       interests: [domain.INTERESTS[0]], traits: [domain.TRAITS[0]],
       desiredTraits: [domain.DESIRED_TRAITS[0]], foodBudgets: ['ANY'],
       dietaryNotes: '', privacy: true, operations: true,
@@ -346,6 +347,22 @@ test('worker claims safely, recovers leases, deduplicates effects, and retries t
   assert.equal(dead.rows[0].attempts, 2);
   const actualDeadAudit = await client.query(`SELECT count(*) FROM audit_logs WHERE action='JOB_DEAD_LETTERED' AND entity_id=(SELECT job_key FROM scheduled_jobs WHERE id=$1)`, [badId]);
   assert.equal(actualDeadAudit.rows[0].count, '1');
+
+    // Operator retries reuse one exception, reopen on repeated failure, and close on success.
+    const exceptionRows=await client.query("SELECT id FROM lifecycle_exceptions WHERE source='scheduled_job' AND entity_id=$1",[attemptTwo!.job_key]);
+    assert.equal(exceptionRows.rowCount,1);
+    await client.query("UPDATE lifecycle_exceptions SET status='RETRYING' WHERE id=$1",[exceptionRows.rows[0].id]);
+    await client.query("UPDATE scheduled_jobs SET status='PENDING',attempts=0,max_attempts=1,next_attempt_at=CURRENT_TIMESTAMP WHERE id=$1",[badId]);
+    const repeated=await worker.claimJob('repeat-failure');assert.equal(repeated?.id,badId);
+    await assert.rejects(worker.processJob(repeated!,'repeat-failure'),/No handler registered/i);
+    await worker.failJob(repeated!,'repeat-failure',new Error('second terminal failure'));
+    const sameException=await client.query("SELECT id,status FROM lifecycle_exceptions WHERE source='scheduled_job' AND entity_id=$1",[attemptTwo!.job_key]);
+    assert.equal(sameException.rowCount,1);assert.equal(sameException.rows[0].id,exceptionRows.rows[0].id);assert.equal(sameException.rows[0].status,'OPEN');
+    await client.query("UPDATE lifecycle_exceptions SET status='RETRYING' WHERE id=$1",[exceptionRows.rows[0].id]);
+    await client.query("UPDATE scheduled_jobs SET job_type='APPLICATION_RECEIVED',status='PENDING',attempts=0,next_attempt_at=CURRENT_TIMESTAMP WHERE id=$1",[badId]);
+    const recoveredRetry=await worker.claimJob('fixed-retry');assert.equal(recoveredRetry?.id,badId);
+    await worker.processJob(recoveredRetry!,'fixed-retry');
+    assert.equal((await client.query("SELECT status FROM lifecycle_exceptions WHERE id=$1",[exceptionRows.rows[0].id])).rows[0].status,'RESOLVED');
 });
 
 test('core lifecycle matches eligible cohorts and persists privacy-safe explanations', { skip: skipReason }, async () => {

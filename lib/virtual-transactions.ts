@@ -4,9 +4,10 @@ import {db,databaseProvider,type QueryClient} from './db';
 
 /** Internal ledger only: never contacts a payment provider. Caller owns transaction. */
 export async function completeVirtualRefund(c:QueryClient,resolutionId:string){
- const request=(await c.query<any>('SELECT r.*,p.application_id,p.amount_cents original_amount,p.status payment_status FROM refund_requests r JOIN payments p ON p.id=r.payment_id WHERE r.resolution_id=$1 FOR UPDATE',[resolutionId])).rows[0];
+ const request=(await c.query<any>('SELECT r.*,p.application_id,p.amount_cents original_amount,p.status payment_status,rc.selected_choice,rc.status resolution_status FROM refund_requests r JOIN payments p ON p.id=r.payment_id JOIN resolution_cases rc ON rc.id=r.resolution_id WHERE r.resolution_id=$1 FOR UPDATE',[resolutionId])).rows[0];
  if(!request)throw new Error('환불 요청을 찾을 수 없어요.');
  if(request.status==='COMPLETED')return {status:'REFUNDED',amount:Number(request.amount_cents)};
+ if(request.selected_choice!=='REFUND'||!['REFUND_REQUESTED','FAILED'].includes(request.resolution_status))throw new Error('환불 선택이 유지된 요청만 처리할 수 있어요. 해결 상태를 다시 확인해 주세요.');
  if(!['PAID','REFUND_AVAILABLE','REFUND_REQUESTED','REFUND_PROCESSING','REFUND_FAILED'].includes(request.payment_status))throw new Error('환불할 수 있는 승인 결제가 없어요.');
  // Older import/fixture writers predate the ledger. Record their existing approval, without changing its amount or status.
  await c.query("INSERT INTO payment_ledger(id,payment_id,request_key,kind,amount_cents,source) SELECT $1,$2,$3,'CHARGE',$4,'LEGACY' WHERE NOT EXISTS(SELECT 1 FROM payment_ledger WHERE payment_id=$2 AND kind='CHARGE') ON CONFLICT(request_key) DO NOTHING",[randomUUID(),request.payment_id,`legacy-charge:${request.payment_id}`,request.original_amount]);

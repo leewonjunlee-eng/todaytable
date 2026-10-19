@@ -5,7 +5,7 @@ import {useEffect,useState} from 'react';
 import {UiIcon} from './ui-icon';
 import {LogoutButton} from './logout-button';
 const adminLinks=[['/admin/applications','신청 중','calendar'],['/admin/matching/review','만남 예정','table'],['/admin/matches/past','지난 만남','clock'],['/admin/bookings','식당·예약','pin'],['/admin/inbox','문의함','message'],['/admin','운영 현황','home']];
-const adminSettings=[['/admin/matching','매칭 기준'],['/admin/events','모집 일정'],['/admin/team','운영팀'],['/admin/settings','운영 설정']];
+const adminSettings=[['/admin/exceptions','자동 처리 확인'],['/admin/matching','매칭 기준'],['/admin/events','모집 일정'],['/admin/team','운영팀'],['/admin/settings','운영 설정']];
 const participantLinks=[['/','home','발견'],['/applications','table','내 만남'],['/chats','message','대화'],['/profile','user','마이']];
 export function SiteNav({admin=false,loggedIn=true,focus=false,back='/',focusTitle='우연한 식탁'}:{admin?:boolean;loggedIn?:boolean;focus?:boolean;back?:string;focusTitle?:string}){
  const path=usePathname(),[unread,setUnread]=useState(0);
