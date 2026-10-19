@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {db,databaseProvider,type QueryClient} from './db';
 import {parseJson,problem} from './operators';
-import {isHardCompatible,type MatchCandidate,groupScore} from './matching';
+import {isAllowedGenderComposition,isHardCompatible,type MatchCandidate,groupScore} from './matching';
 import {effectivePolicy,explainGroup} from './matching-policy';
 import {createMatchingProposal,automaticallyConfirmProposal} from './matching-review';
 import {recommendVenues} from './venues';
@@ -22,7 +22,7 @@ async function eligible(c:QueryClient,tableId:string,applicationId:string){
  const members:MatchCandidate[]=[];for(const row of active){const m=await candidate(c,row.application_id);if(!m)return null;members.push({...m,eventIds:[e.id]});}
  const policy=await effectivePolicy(c,e.id);if(!isHardCompatible(members,applicant,policy.minScore,policy.weights))return null;
  members.push({...applicant,eventIds:[e.id]});
- if(groupScore(members,policy.weights)<policy.minScore)return null;
+ if(!isAllowedGenderComposition(members)||groupScore(members,policy.weights)<policy.minScore)return null;
  const venues=await recommendVenues(c,e,members,{sourceTableId:tableId});if(!venues.some(v=>v.eligible&&!v.requiresDietaryConfirmation))return null;
  return {event:e,members,policy};
 }

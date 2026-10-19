@@ -1,4 +1,4 @@
-export const MATCH_ENGINE_VERSION='connected-events-v4';
+export const MATCH_ENGINE_VERSION='connected-events-v5-gender';
 export type MatchCandidate = {
   applicationId: string; userId: string; birthYear: number; gender: string; mbti: string;
   interests: string[]; traits: string[]; desiredTraits: string[]; eventIds: string[]; paid: boolean; valid: boolean;
@@ -74,7 +74,14 @@ export function groupScore(group: MatchCandidate[], weights = DEFAULT_WEIGHTS) {
   for (let i = 0; i < group.length; i += 1) for (let j = i + 1; j < group.length; j += 1) { total += pairScore(group[i], group[j], weights); pairs += 1; }
   return pairs ? (total / pairs) * 0.85 + groupGenderBalance(group) * 0.15 : 0;
 }
+/** Final composition is a hard rule, independent of scoring weights. */
+export function isAllowedGenderComposition(group:ReadonlyArray<{gender:string}>){
+ const men=group.filter(m=>m.gender==='MAN').length,women=group.filter(m=>m.gender==='WOMAN').length;
+ return group.length>=4&&group.length<=6&&men+women===group.length&&men>=2&&women>=2;
+}
 export function isHardCompatible(group: MatchCandidate[], candidate: MatchCandidate, minScore = 0, weights = DEFAULT_WEIGHTS) {
+  const next=[...group,candidate];
+  if(next.length>6||next.some(m=>!['MAN','WOMAN'].includes(m.gender))||next.filter(m=>m.gender==='MAN').length>4||next.filter(m=>m.gender==='WOMAN').length>4)return false;
   if (!candidate.paid || !candidate.valid || group.some((m) => m.userId === candidate.userId)) return false;
   if (group.some((m) => (candidate.blockedUserIds ?? []).includes(m.userId) || (m.blockedUserIds ?? []).includes(candidate.userId))) return false;
   if (!shareEvent(group, candidate)) return false;
@@ -104,7 +111,7 @@ export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v
     const found: MatchCandidate[][] = [];
     const visit = (start: number, group: MatchCandidate[]) => {
       if (++exploredNodes > nodeBudget || found.length >= MAX_GROUPS) return;
-      if (group.length === size) { found.push(group.slice()); return; }
+      if (group.length === size) { if(isAllowedGenderComposition(group))found.push(group.slice()); return; }
       for (let i = start; i < pool.length; i += 1) {
         const next = pool[i];
         if (isHardCompatible(group, next, minScore, weights)) visit(i + 1, [...group, next]);
@@ -134,11 +141,13 @@ export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v
     // Large cohorts compare a bounded set of complete groups by quality.
     let pool = eligible.slice();
     while (pool.length >= 4 && maxSeats - bestGroups.reduce((n,g)=>n+g.length,0) >= 4) {
+      exploredNodes=0; // Each large-cohort step receives a bounded search budget.
       const available=Math.min(pool.length,maxSeats-bestGroups.reduce((n,g)=>n+g.length,0));
       const size = preferredSize(available) || 4;
       let possibilities=groupsFor(pool,Math.min(size,pool.length));
       if(!possibilities.length)for(const fallback of [5,4])if(fallback<size){possibilities=groupsFor(pool,fallback);if(possibilities.length)break;}
-      const group=possibilities.map(members=>({members,score:groupScore(members,weights),key:key(members)})).sort((a,b)=>b.score-a.score||a.key.localeCompare(b.key))[0]?.members;
+      const remainderFeasible=(members:MatchCandidate[])=>{const used=new Set(members),left=pool.filter(m=>!used.has(m)),men=left.filter(m=>m.gender==='MAN').length,women=left.filter(m=>m.gender==='WOMAN').length;if(!left.length)return true;if(men+women!==left.length)return false;for(let tables=Math.ceil(left.length/6);tables<=Math.floor(left.length/4);tables++)if(men>=2*tables&&women>=2*tables&&men<=4*tables&&women<=4*tables)return true;return false;};
+      const group=possibilities.map(members=>({members,feasible:remainderFeasible(members),score:groupScore(members,weights),key:key(members)})).sort((a,b)=>Number(b.feasible)-Number(a.feasible)||b.score-a.score||a.key.localeCompare(b.key))[0]?.members;
       if (!group) break;
       bestGroups.push(group);
       const used = new Set(group.map((m) => m.applicationId));
@@ -148,7 +157,7 @@ export function buildDeterministicGroups(candidates: MatchCandidate[], seed = 'v
   } else {
     search(eligible, [], 0);
   }
-  const groups = bestGroups.map((members) => ({ members, score: Number(groupScore(members, weights).toFixed(6)), eventId: shareEvent(members), explanation: '결제·동의·공통 일정·연령 폭 8살·상호 제외를 통과했으며 성별 균형·MBTI·관심사·성향·새 만남을 고려했습니다.' }));
+  const groups = bestGroups.map((members) => ({ members, score: Number(groupScore(members, weights).toFixed(6)), eventId: shareEvent(members), explanation: '결제·동의·공통 일정·허용 성비·연령 폭 8살·상호 제외를 통과했으며 성별 균형·MBTI·관심사·성향·새 만남을 고려했습니다.' }));
   const used = new Set(bestGroups.flat().map((m) => m.applicationId));
   return { groups, unmatched: eligible.filter((c) => !used.has(c.applicationId)), matchedCount: bestCount, qualityScore: Number(groups.reduce((n, g) => n + g.score, 0).toFixed(6)) };
 }

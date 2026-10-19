@@ -71,7 +71,7 @@ async function fixture(label: string, count = 4, deadlineMs = 60_000) {
   for (let i = 0; i < count; i++) {
     const u = await db.query<{ id: string }>(`INSERT INTO users(email,password_hash) VALUES($1,'test') RETURNING id`, [`${label}-${i}-${randomUUID()}@test.invalid`]);
     const id = u.rows[0].id; users.push(id);
-    await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010-0000-0000',1990,'PREFER_NOT_TO_SAY','INTJ',${provider === 'postgres' ? '$3::text[]' : '$3'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? 'true' : '1'},${provider === 'postgres' ? 'true' : '1'},${provider === 'postgres' ? 'now()' : 'CURRENT_TIMESTAMP'})`, [id, `${label}-${i}`, arr, traits]);
+    await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010-0000-0000',1990,'${i%2?'WOMAN':'MAN'}','INTJ',${provider === 'postgres' ? '$3::text[]' : '$3'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? 'true' : '1'},${provider === 'postgres' ? 'true' : '1'},${provider === 'postgres' ? 'now()' : 'CURRENT_TIMESTAMP'})`, [id, `${label}-${i}`, arr, traits]);
     const result = await submitApplication(id, { eventIds: [event.rows[0].id], pass: 'SINGLE', requestKey: randomUUID() });
     assert.equal(result.payment, 'PAID'); apps.push(result.id);
   }

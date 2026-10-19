@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {db,databaseProvider} from './db';
 import {problem,parseJson} from './operators';
 import {isCanonicalUuid} from './domain';
-import {type MatchCandidate,isHardCompatible,groupScore} from './matching';
+import {isAllowedGenderComposition,type MatchCandidate,isHardCompatible,groupScore} from './matching';
 import {effectivePolicy,enrichCandidates} from './matching-policy';
 import {recommendVenues} from './venues';
 import {provisionTable} from './lifecycle-service';
@@ -29,7 +29,7 @@ export async function reconfigureTables(actorId:string,b:any){
  if(candidates.some(m=>others.some(s=>s.application_id===m.applicationId||(s.user_id===m.userId&&+new Date(s.starts_at)<+new Date(event.ends_at)&&+new Date(event.starts_at)<+new Date(s.ends_at)))))problem('같은 시간에 다른 식탁에 참여하는 멤버가 있습니다.',409);
  if(new Set(candidates.map(m=>m.userId)).size!==candidates.length)problem('한 참가자를 여러 식탁에 동시에 배치할 수 없습니다.',409);
  const eventSeats=(await c.query<any>("SELECT tm.table_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND tm.status='ACTIVE'",[event.id])).rows.filter(r=>!b.tableIds.includes(r.table_id)).length;if(eventSeats+assigned.length>Number(event.capacity))problem('회차의 전체 정원을 초과합니다.',409);
- const groups:MatchCandidate[][]=b.groups.map((ids:string[])=>ids.map(id=>candidates.find(m=>m.applicationId===id)!));for(const group of groups){const seen:MatchCandidate[]=[];for(const m of group){if(!isHardCompatible(seen,m,policy.minScore,policy.weights))problem('연령·제외 관계·최소 매칭 조건을 만족하지 않는 구성입니다.',409);seen.push(m);}if(groupScore(group,policy.weights)<policy.minScore)problem('최소 매칭 점수를 만족하지 않습니다.',409);}
+ const groups:MatchCandidate[][]=b.groups.map((ids:string[])=>ids.map(id=>candidates.find(m=>m.applicationId===id)!));for(const group of groups){if(!isAllowedGenderComposition(group))problem('허용된 성비 조합으로 구성해 주세요.',409);const seen:MatchCandidate[]=[];for(const m of group){if(!isHardCompatible(seen,m,policy.minScore,policy.weights))problem('연령·제외 관계·최소 매칭 조건을 만족하지 않는 구성입니다.',409);seen.push(m);}if(groupScore(group,policy.weights)<policy.minScore)problem('최소 매칭 점수를 만족하지 않습니다.',409);}
  // Keep original tables and rooms as history. New compositions receive fresh rooms.
  for(const old of selected){await c.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND status='ACTIVE'",[old.id]);await c.query("UPDATE dining_tables SET status='CANCELLED' WHERE id=$1",[old.id]);await c.query("UPDATE venue_booking_tasks SET status='CANCELLED',version=version+1,updated_by=$2,updated_at=now() WHERE table_id=$1",[old.id,actorId]);await c.query("UPDATE table_reservations SET status='CANCELLED' WHERE table_id=$1",[old.id]);await c.query("UPDATE scheduled_jobs SET status='DONE',completed_at=now(),lease_owner=NULL,lease_until=NULL WHERE payload->>'tableId'=$1 AND status IN ('PENDING','RUNNING')",[old.id],"UPDATE scheduled_jobs SET status='DONE',completed_at=CURRENT_TIMESTAMP,lease_owner=NULL,lease_until=NULL WHERE json_extract(payload,'$.tableId')=$1 AND status IN ('PENDING','RUNNING')");}
  const runId=randomUUID();await c.query("INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,status,matched_count,quality_score,completed_at) VALUES($1,$2,$3,'operator-emergency',$4,'COMPLETED',$5,0,now())",[runId,event.id,policy.id,JSON.stringify({exceptionType:b.exceptionType,reason:b.reason,sourceTables:b.tableIds}),assigned.length]);

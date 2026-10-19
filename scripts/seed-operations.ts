@@ -39,7 +39,7 @@ export async function seedOperations() {
     const adminId = admin.rows[0].id;
     const viewers = await client.query<{id:string;email:string}>("SELECT id,email FROM users WHERE email IN ('user@todaytable.local','guest@todaytable.local') AND role='PARTICIPANT' ORDER BY email");
     for (const viewer of viewers.rows) await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at)
-      VALUES($1,'김지안','',1995,'PREFER_NOT_TO_SAY','INFP',true,true,now()) ON CONFLICT(user_id) DO NOTHING`, [viewer.id]);
+      VALUES($1,'김지안','',1995,'MAN','INFP',true,true,now()) ON CONFLICT(user_id) DO NOTHING`, [viewer.id]);
     const users: string[] = [];
     for (let n=0; n<48; n++) {
       const userId=id(`user:${n}`); users.push(userId);
@@ -66,7 +66,7 @@ export async function seedOperations() {
           await client.query(`INSERT INTO events(id,title,starts_at,ends_at,application_deadline,area,capacity,price_cents,created_by,venue_id,is_demo) VALUES($1,$2,$3,$4,$5,$6,24,8000,$7,$8,TRUE)`,
             [eventId,`${REGIONS[n%4]} ${['취향을 나누는 저녁','여행 이야기 식탁','퇴근 후 새로운 만남'][n%3]}`,start,end,deadline,REGIONS[n%4],adminId,id(`venue:${n%4}`)]);
       const members = Array.from({length:cohort.count},(_,i)=>users[(n*6+i)%48]);
-      if ([0,3,6].includes(n)) viewers.rows.slice(0,2).forEach((v,i)=>{members[i]=v.id;});
+      if ([0,3,6].includes(n)){const profiles=(await client.query<any>('SELECT user_id,gender FROM profiles')).rows;viewers.rows.filter(v=>n===6||['MAN','WOMAN'].includes(profiles.find(p=>p.user_id===v.id)?.gender)).slice(0,2).forEach((v,i)=>{members[i]=v.id;});}
       const applications: string[]=[];
       for (let i=0;i<members.length;i++) {
         const app=id(`app:${n}:${i}`), pay=id(`payment:${n}:${i}`), grant=id(`grant:${n}:${i}`);

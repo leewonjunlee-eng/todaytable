@@ -3,7 +3,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {db,databaseProvider,type QueryClient} from '../lib/db';
 import {showcaseId as uid,planShowcase,showcaseThursday,type SourceRow,type ShowcasePerson,type Cohort} from '../lib/showcase-plan';
 import {activeShowcase,type ShowcaseSummary} from '../lib/showcase';
-import {groupScore,type MatchCandidate} from '../lib/matching';
+import {groupScore,isAllowedGenderComposition,type MatchCandidate} from '../lib/matching';
 import {conversationQuestions} from '../lib/table-experience';
 import {hashPassword} from '../lib/security';
 import {populateOperatorInventory,operatorInventoryVenueIds} from './populate-operator-workspace';
@@ -14,12 +14,12 @@ export async function populateLifecycleShowcase(payload:Payload,now=new Date()){
  if(!/^[a-f0-9]{64}$/.test(payload.sha256)||!payload.records.length||new Set(payload.records.map(r=>r.sheet_row)).size!==payload.records.length)throw Error('A complete source dataset with unique row keys is required.');
  if(Number(payload.manifest?.record_count)!==payload.records.length)throw Error('Source manifest count does not match the complete dataset.');
  if(payload.original_base64&&createHash('sha256').update(Buffer.from(payload.original_base64,'base64')).digest('hex')!==payload.sha256)throw Error('Source workbook checksum mismatch.');
- const anchor=showcaseThursday(now),anchorDate=anchor.toISOString().slice(0,10),batch=`source-lifecycle-v1:${payload.sha256}:${anchorDate}`;
+ const anchor=showcaseThursday(now),anchorDate=anchor.toISOString().slice(0,10),batch=`source-lifecycle-v2-gender:${payload.sha256}:${anchorDate}`;
  const previous=(await db.query<any>('SELECT summary FROM showcase_batches WHERE id=$1',[batch])).rows[0];if(previous)return {created:false,...parseJson<ShowcaseSummary>(previous.summary,{} as ShowcaseSummary)};
  await populateOperatorInventory();
  const c=await db.connect(),plan=planShowcase(payload.records),eventIds:string[]=[],userIds:string[]=[],primary=new Map<number,{userId:string;appId:string;person:ShowcasePerson;cohort:Cohort}>();
  const password=await hashPassword(randomUUID());let tables=0,applications=0,past=0,upcoming=0,recruiting=0,feedbackCount=0,chatCount=0;
- const policy={id:'showcase-v1',name:'취향이 이어지는 저녁',description:'원본 설문을 바탕으로 구성한 운영 체험 자료',minScore:0,learningEnabled:false,weights:{gender:.4,mbti:.25,interests:.2,traits:.1,novelty:.05}};
+ const policy={id:'showcase-v2-gender',name:'취향이 이어지는 저녁',description:'원본 설문을 바탕으로 구성한 운영 체험 자료',minScore:0,learningEnabled:false,weights:{gender:.4,mbti:.25,interests:.2,traits:.1,novelty:.05}};
  try{
  await c.query('BEGIN');if(databaseProvider==='postgres')await c.query("SELECT pg_advisory_xact_lock(hashtextextended('todaytable:lifecycle',0))");
  const exists=(await c.query<any>('SELECT summary FROM showcase_batches WHERE id=$1',[batch])).rows[0];if(exists){await c.query('COMMIT');return {created:false,...parseJson(exists.summary,{})};}
@@ -59,13 +59,13 @@ export async function populateLifecycleShowcase(payload:Payload,now=new Date()){
    if(!viewer){primary.set(item.person.row.sheet_row,{userId:item.userId,appId:app.appId,person:item.person,cohort});await c.query('INSERT INTO showcase_members(batch_id,dataset_sha256,sheet_name,sheet_row,user_id,application_id,payment_id,event_id,cohort,assumptions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[batch,payload.sha256,item.person.row.sheet_name??'설문지 응답 시트1',item.person.row.sheet_row,item.userId,app.appId,app.paymentId,eventId,cohort,JSON.stringify(item.person.assumptions)]);if(cohort==='PAST')past++;else if(cohort==='UPCOMING')upcoming++;else recruiting++;}
   }
   if(cohort==='RECRUITING')return;
-  if(people.length<4||people.length>6||Math.max(...people.map(p=>p.person.age))-Math.min(...people.map(p=>p.person.age))>8)throw Error('Invalid showcase table constraints.');
+  if(!isAllowedGenderComposition(people.map(p=>p.person))||Math.max(...people.map(p=>p.person.age))-Math.min(...people.map(p=>p.person.age))>8)throw Error('Invalid showcase table constraints.');
   tables++;const tableId=uid(`${batch}:table:${index}`),runId=uid(`${batch}:run:${index}`),roomId=uid(`${batch}:room:${index}`),created=new Date(+deadline+300000),score=groupScore(roster,policy.weights),topics=conversationQuestions(roster);
   await c.query("INSERT INTO match_runs(id,event_id,rule_version,seed,input_snapshot,matched_count,quality_score,created_at,completed_at) VALUES($1,$2,'showcase-v1',$3,$4,$5,$6,$7,$7)",[runId,eventId,batch,JSON.stringify({simulation:true,policy,candidates:roster,sourceRows:people.map(p=>p.person.row.sheet_row)}),people.length,score,created]);
   await c.query("INSERT INTO dining_tables(id,event_id,match_run_id,table_number,status,quality_score,venue_id,starts_at,area,capacity,locked_at,provision_status,confirmation_source,created_at) VALUES($1,$2,$3,1,'CONFIRMED',$4,$5,$6,$7,$8,$9,'PROVISIONED','AUTO',$9)",[tableId,eventId,runId,score,venue.id,starts,area,people.length,created]);
   const reservation=`우연한 식탁 ${index+1}`;
   await c.query("INSERT INTO table_reservations(table_id,venue_id,reservation_name,meeting_time,status,provider) VALUES($1,$2,$3,$4,'CONFIRMED','MOCK')",[tableId,venue.id,reservation,starts]);
-  await c.query("INSERT INTO venue_booking_tasks(table_id,status,reservation_name,confirmation_code,note,updated_by,updated_at) VALUES($1,'CONFIRMED',$2,$3,$4,$5,$6)",[tableId,reservation,`TT-${anchorDate.replaceAll('-','')}-${index+1}`,'안쪽 테이블, 함께 도착하지 않아도 예약명으로 안내해 주세요.',admin.id,created]);
+  await c.query("INSERT INTO venue_booking_tasks(table_id,status,reservation_name,confirmation_code,note,updated_by,updated_at) VALUES($1,'CONFIRMED',$2,$3,$4,$5,$6)",[tableId,reservation,`TT-G2-${anchorDate.replaceAll('-','')}-${index+1}`,'안쪽 테이블, 함께 도착하지 않아도 예약명으로 안내해 주세요.',admin.id,created]);
   await c.query('INSERT INTO journey_rooms(id,table_id,welcome_message,rules_message,curation_message,topics,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[roomId,tableId,'우리 식탁에 오신 것을 환영해요.','서로의 이야기를 존중하고 편안한 속도로 대화해요.','함께 좋아하는 이야기로 시작해 보세요.',JSON.stringify(topics),created]);
   const guide=`${title} 식탁이 준비됐어요. ${new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'numeric',minute:'numeric'}).format(starts)} · ${venue.name} · 예약명 ${reservation}`;
   await c.query("INSERT INTO journey_messages(id,room_id,author_user_id,body,request_key,kind,created_at) VALUES($1,$2,NULL,$3,$4,'SYSTEM',$5)",[uid(`${batch}:guide:${index}`),roomId,guide,uid(`${batch}:guide-request:${index}`),created]);
@@ -91,16 +91,32 @@ export async function populateLifecycleShowcase(payload:Payload,now=new Date()){
  for(const [i,group] of plan.groups.entries())await addGroup(group.people.map(person=>({userId:uid(`${batch}:person:${person.row.sheet_row}`),person,key:`source:${person.row.sheet_row}`})),group.cohort,i);
  // Keep review credentials and legacy records intact while giving that account the complete journey.
  const viewers=(await c.query<any>("SELECT u.id,p.birth_year,p.display_name,p.gender,p.mbti,p.interests FROM users u JOIN profiles p ON p.user_id=u.id WHERE u.role='PARTICIPANT' AND u.email IN ('user@todaytable','guest@todaytable.local') ORDER BY u.email")).rows.slice(0,1);
- for(const viewer of viewers){const age=2026-Number(viewer.birth_year),available=[...primary.values()].filter(p=>p.cohort==='RECRUITING'&&p.person.area==='홍대/합정'&&Math.abs(p.person.age-age)<=4).slice(0,5);if(available.length<5)throw Error('Five compatible fictional peers are required for the review account.');
+ for(const viewer of viewers){const age=2026-Number(viewer.birth_year);
+  if(!['MAN','WOMAN'].includes(viewer.gender)){
+   const source=plan.people.find(p=>p.name===viewer.display_name&&p.age===age)??plan.people.find(p=>p.age===age&&p.area==='홍대/합정');if(!source)throw Error('A supplied profile is required for the fictional review account.');
+   await c.query('UPDATE profiles SET gender=$2 WHERE user_id=$1',[viewer.id,source.gender]);
+   await c.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,before_data,after_data) VALUES($1,'SHOWCASE_REVIEW_PROFILE_LINKED','profile',$2,$3,$4)",[admin.id,viewer.id,JSON.stringify({gender:viewer.gender}),JSON.stringify({gender:source.gender,sourceRow:source.row.sheet_row,reason:'Explicit fictional dataset experience; no identity inference.'})]);viewer.gender=source.gender;
+  }
+  const pool=[...primary.values()].filter(p=>p.cohort==='RECRUITING'&&p.person.area==='홍대/합정'&&Math.abs(p.person.age-age)<=4),men=pool.filter(p=>p.person.gender==='MAN').slice(0,viewer.gender==='MAN'?1:2),women=pool.filter(p=>p.person.gender==='WOMAN').slice(0,viewer.gender==='WOMAN'?3:4),available=[...men,...women];if(available.length!==5)throw Error('Five compatible fictional peers are required for the review account.');
   const own={...available[0].person,name:viewer.display_name,age,gender:viewer.gender,mbti:viewer.mbti,interests:parseJson<string[]>(viewer.interests,[]),uses:1,amount:8000};userIds.push(viewer.id);await c.query('INSERT INTO showcase_viewers(batch_id,user_id) VALUES($1,$2)',[batch,viewer.id]);
   for(const [n,cohort] of (['PAST','UPCOMING','RECRUITING'] as const).entries()){const index=plan.groups.length+n;await addGroup([{userId:viewer.id,person:own,key:`viewer:${viewer.id}:${cohort}`},...(cohort==='RECRUITING'?[]:available.map(p=>({userId:p.userId,person:p.person,key:`repeat:${viewer.id}:${cohort}:${p.person.row.sheet_row}`})))],cohort,index,true);}
  }
  const inquiryExamples=[['MATCHING','식당에서 조금 일찍 기다려도 될까요?','퇴근 후 바로 이동하면 15분 정도 일찍 도착할 것 같아요. 예약명으로 먼저 안내받을 수 있을까요?'],['APPLICATION','함께 고른 날짜는 어디서 확인하나요?','신청한 날짜와 매칭 마감 시간을 다시 확인하고 싶어요.'],['PAYMENT','남은 참가권을 다음에 사용할 수 있나요?','이번 만남 이후 남아 있는 참가권은 언제까지 사용할 수 있는지 궁금해요.'],['OTHER','처음 참여하는데 준비할 것이 있나요?','처음이라 조금 떨리네요. 시작 전에 참고할 내용이 있을까요?']];
  for(const [i,person] of [...primary.values()].filter(p=>p.cohort!=='PAST').slice(0,12).entries()){
   const ticket=uid(`${batch}:ticket:${i}`),example=inquiryExamples[i%4],status=['OPEN','IN_PROGRESS','WAITING_CUSTOMER','RESOLVED'][i%4],created=new Date(+now-(24+i)*3600000);
-  await c.query("INSERT INTO support_tickets(id,number,user_id,contact_name,contact_email,category,subject,status,is_demo,application_id,assignee_id,created_at,updated_at,last_public_at,first_response_at,resolved_at) VALUES($1,$2,$3,$4,'',$5,$6,$7,true,$8,$9,$10,$11,$11,$12,$13)",[ticket,`TT-${anchorDate.replaceAll('-','')}-${String(i+1).padStart(3,'0')}`,person.userId,person.person.name,example[0],example[1],status,person.appId,i%4?admin.id:null,created,new Date(+created+1800000),i%4?new Date(+created+1200000):null,status==='RESOLVED'?new Date(+created+1800000):null]);
+  await c.query("INSERT INTO support_tickets(id,number,user_id,contact_name,contact_email,category,subject,status,is_demo,application_id,assignee_id,created_at,updated_at,last_public_at,first_response_at,resolved_at) VALUES($1,$2,$3,$4,'',$5,$6,$7,true,$8,$9,$10,$11,$11,$12,$13)",[ticket,`TT-G2-${anchorDate.replaceAll('-','')}-${String(i+1).padStart(3,'0')}`,person.userId,person.person.name,example[0],example[1],status,person.appId,i%4?admin.id:null,created,new Date(+created+1800000),i%4?new Date(+created+1200000):null,status==='RESOLVED'?new Date(+created+1800000):null]);
   await c.query("INSERT INTO support_messages(id,ticket_id,author_user_id,author_name,kind,body,request_key,created_at) VALUES($1,$2,$3,$4,'PUBLIC',$5,$6,$7)",[uid(`${batch}:question:${i}`),ticket,person.userId,person.person.name,example[2],uid(`${batch}:question-request:${i}`),created]);
   if(i%4)await c.query("INSERT INTO support_messages(id,ticket_id,author_user_id,author_name,kind,body,request_key,created_at) VALUES($1,$2,$3,'운영팀','PUBLIC',$4,$5,$6)",[uid(`${batch}:answer:${i}`),ticket,admin.id,['','안녕하세요. 식탁 안내의 일정과 예약명을 확인해 주세요. 추가로 궁금한 점이 있으면 이어서 말씀해 주세요.','확인을 위해 가능한 시간대를 알려주시겠어요? 편하게 답변 남겨 주세요.','확인했어요. 요청하신 내용으로 안내를 정리했습니다. 즐거운 저녁 보내세요!'][i%4],uid(`${batch}:answer-request:${i}`),new Date(+created+1200000)]);
+ }
+ // Superseded fictional batches remain historical, but their future work must stop.
+ const older=(await c.query<any>('SELECT id,summary FROM showcase_batches WHERE active=true')).rows;
+ for(const old of older){const scope=parseJson<ShowcaseSummary>(old.summary,{} as ShowcaseSummary),oldEvents=new Set(scope.eventIds??[]),oldApps=new Set((await c.query<any>('SELECT application_id,event_id FROM application_options')).rows.filter(o=>oldEvents.has(o.event_id)).map(o=>o.application_id)),oldTables=(await c.query<any>('SELECT id,event_id FROM dining_tables')).rows.filter(t=>oldEvents.has(t.event_id));
+  const future=new Set((await c.query<any>('SELECT id,starts_at FROM events')).rows.filter(e=>oldEvents.has(e.id)&&+new Date(e.starts_at)>+now).map(e=>e.id));
+  for(const t of oldTables.filter(t=>future.has(t.event_id))){await c.query("UPDATE dining_tables SET status='CANCELLED' WHERE id=$1",[t.id]);await c.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND status='ACTIVE'",[t.id]);await c.query("UPDATE table_reservations SET status='CANCELLED' WHERE table_id=$1",[t.id]);await c.query("UPDATE venue_booking_tasks SET status='CANCELLED',version=version+1 WHERE table_id=$1",[t.id]);}
+  for(const id of future){await c.query("UPDATE events SET status='CANCELLED' WHERE id=$1",[id]);await c.query("UPDATE applications SET status='CANCELED',matching_status='NO_MATCH',updated_at=now() WHERE id IN (SELECT application_id FROM application_options WHERE event_id=$1)",[id]);}
+  const tableIds=new Set(oldTables.map(t=>t.id));
+  for(const j of (await c.query<any>("SELECT id,payload FROM scheduled_jobs WHERE status IN ('PENDING','RUNNING')")).rows){const p=parseJson<any>(j.payload,{});if(oldEvents.has(p.eventId)||oldApps.has(p.applicationId)||tableIds.has(p.tableId))await c.query("UPDATE scheduled_jobs SET status='DONE',completed_at=now(),lease_owner=NULL,lease_until=NULL WHERE id=$1",[j.id]);}
+  await c.query("INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,after_data) VALUES($1,'SHOWCASE_BATCH_SUPERSEDED','showcase_batch',$2,$3)",[admin.id,old.id,JSON.stringify({replacement:batch,reason:'Strict gender composition; source and historical records retained.'})]);
  }
  const summary:ShowcaseSummary&{feedback:number;chatMessages:number}={sourceRows:payload.records.length,participants:userIds.length,applications,past,upcoming,recruiting,tables,eventIds,userIds,anchorDate,feedback:feedbackCount,chatMessages:chatCount};
  await c.query('UPDATE showcase_batches SET active=false WHERE active=true');await c.query('UPDATE showcase_batches SET summary=$2,active=true WHERE id=$1',[batch,JSON.stringify(summary)]);

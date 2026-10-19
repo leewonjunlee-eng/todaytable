@@ -2,13 +2,14 @@ import {recordReallocation,reallocationPriority} from './reallocation';
 import {createHash,randomUUID} from 'node:crypto';
 import {db,databaseProvider,type QueryClient} from './db';
 import {matchingInput,matchingPlan,type MatchingPolicy} from './matching-policy';
-import {MATCH_ENGINE_VERSION,isHardCompatible,groupScore,type MatchCandidate} from './matching';
+import {isAllowedGenderComposition,MATCH_ENGINE_VERSION,isHardCompatible,groupScore,type MatchCandidate} from './matching';
 import {sharedInterestKeywords} from './table-experience';
 import {recommendVenues} from './venues';
 import {parseJson,problem} from './operators';
 import {provisionTable} from './lifecycle-service';
 const json=JSON.stringify;
 export async function createMatchingProposal(c:QueryClient,event:any,members:MatchCandidate[],policy:MatchingPolicy,runId:string,score:number,explanation:string,sourceTableId?:string){
+ if(!isAllowedGenderComposition(members))problem('허용된 성비 조합으로 구성해 주세요.',409);
  let fingerprint=createHash('sha256').update(json({event:event.id,members:members.map(m=>m.applicationId).sort(),policy,sourceTableId})).digest('hex');
  const previous=(await c.query<any>('SELECT id,status FROM matching_proposals WHERE fingerprint=$1',[fingerprint])).rows[0];if(previous&&previous.status!=='STALE')return {id:previous.id,created:false,status:previous.status};
  if(previous)fingerprint=createHash('sha256').update(`${fingerprint}:${randomUUID()}`).digest('hex');
@@ -44,6 +45,7 @@ async function validateGroup(c:QueryClient,p:any,event:any,members:MatchCandidat
   const candidate={...m,birthYear:Number(r.birth_year),gender:r.gender,mbti:r.mbti,interests:parseJson<string[]>(r.interests,[]),traits:parseJson<string[]>(r.traits,[]),desiredTraits:parseJson<string[]>(r.desired_traits,[]),blockedUserIds:relations.filter(x=>x.source_user_id===m.userId).map(x=>x.target_user_id)};
   if(!isHardCompatible(current,candidate,policy.minScore,policy.weights))problem('연령·만남 제외·궁합 조건이 변경됐어요. 다시 추천해 주세요.',409);current.push(candidate);
  }
+ if(!isAllowedGenderComposition(current))problem('성비는 4명 2:2, 5명 2:3·3:2, 6명 2:4·3:3·4:2로 구성해야 합니다.',409);
  if(groupScore(current,policy.weights)<policy.minScore)problem('최소 매칭 기준을 만족하지 않습니다.',409);
  const occupied=(await c.query<any>("SELECT tm.user_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND tm.status='ACTIVE' AND ($2::uuid IS NULL OR t.id<>$2)",[event.id,p.source_table_id])).rows.length;
  if(occupied+current.length>Number(event.capacity))problem('회차 정원이 변경됐어요.',409);

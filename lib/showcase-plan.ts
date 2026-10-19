@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {groupScore,isAllowedGenderComposition} from './matching';
 import {REGIONS} from './domain';
 import {normalizeInterests} from './feedback-domain';
 export type SourceRow={sheet_row:number;sheet_name?:string;fields:Record<string,string>;issues?:string[]};
@@ -15,15 +16,37 @@ export function normalizeSource(row:SourceRow):ShowcasePerson{
  const uses=/[34]\s*회/.test(f.pass_choice??'')?3:1;
  return {row,name:(f.name??'').trim()||`참가자 ${row.sheet_row}`,age,gender:/^여/.test(f.gender??'')?'WOMAN':/^남/.test(f.gender??'')?'MAN':'PREFER_NOT_TO_SAY',mbti,areas:[...areas],area:areas[0],interests:normalizeInterests(list(f.interests)),traits:list(f.traits),desiredTraits:list(f.desired_traits),budgets:budgets.length?[...new Set(budgets)]:['ANY'],uses,amount:uses===3?15000:8000,assumptions:{sourceRow:row.sheet_row,sourceIssues:row.issues??[],birthYear:`2026 minus supplied age ${age}`,originalDates:f.dates??'',dateMapping:'Supplied yearless choices are represented by relative Thursday cohorts for this fictional operating timeline.',originalAreas:rawArea,areaMapping:areas,mbtiReview:!match||match[0]!==rawMbti,originalMbti:f.mbti??'',contact:'No source phone or Instagram is copied; accounts are synthetic and cannot receive external delivery.',payment:'MOCK approval; no charge or external booking',consent:'Synthetic review identities only; original consent is preserved in source, not inferred.'}};
 }
-/** Every row is preserved, including duplicates and groups too small to confirm. */
+/** Preserve every supplied row; only complete, valid compositions are confirmed. */
 export function planShowcase(rows:SourceRow[]){
  const people=rows.map(normalizeSource),groups:{people:ShowcasePerson[];cohort:Cohort;area:string}[]=[];
- for(const area of REGIONS){const pool=people.filter(p=>p.area===area).sort((a,b)=>a.age-b.age||a.row.sheet_row-b.row.sheet_row);let turn=0;
-  while(pool.length){let n=Math.min(6,pool.length);while(n>1&&pool[n-1].age-pool[0].age>8)n--;
-   const left=pool.length-n;if(n===6&&left>0&&left<4&&pool[pool.length-1].age-pool[Math.max(0,n-2)].age<=8)n=pool.length<=9?pool.length-4:4;
-   const members=pool.splice(0,n),cohort:Cohort=n<4?'RECRUITING':(['PAST','UPCOMING','RECRUITING'] as const)[turn++%3];groups.push({people:members,cohort,area});
+ const pairs=[[4,2],[5,2],[5,3],[6,2],[6,3],[6,4]];
+ const score=(members:ShowcasePerson[])=>groupScore(members.map(p=>({applicationId:String(p.row.sheet_row),userId:String(p.row.sheet_row),birthYear:2026-p.age,gender:p.gender,mbti:p.mbti,interests:p.interests,traits:p.traits,desiredTraits:p.desiredTraits,eventIds:['showcase'],paid:true,valid:true})));
+ for(const area of REGIONS){let pool=people.filter(p=>p.area===area).sort((a,b)=>a.age-b.age||a.row.sheet_row-b.row.sheet_row),turn=0;
+  const consume=(members:ShowcasePerson[],cohort:Cohort)=>{groups.push({people:members,cohort,area});const used=new Set(members);pool=pool.filter(p=>!used.has(p));};
+  // Reserve compatible peers for the existing review account's past and future dinners.
+  if(area===REGIONS[0]){const peers=pool.filter(p=>p.age>=27&&p.age<=33),men=peers.filter(p=>p.gender==='MAN').slice(0,2),women=peers.filter(p=>p.gender==='WOMAN').slice(0,4);if(men.length===2&&women.length===4)consume([...men,...women],'RECRUITING');}
+  while(pool.length>=4){
+   let selected:ShowcasePerson[]|undefined;
+   for(const [size,men] of [...pairs.slice(turn%pairs.length),...pairs.slice(0,turn%pairs.length)]){
+    let best=-1;
+    for(const age of [...new Set(pool.map(p=>p.age))]){
+     const window=pool.filter(p=>p.age>=age&&p.age<=age+8);
+     for(const anchor of window.slice(0,12)){
+      const affinity=(p:ShowcasePerson)=>p.interests.filter(x=>anchor.interests.includes(x)).length*3+Number(p.mbti===anchor.mbti)*2-Math.abs(p.age-anchor.age)*.1;
+      const rank=(a:ShowcasePerson,b:ShowcasePerson)=>affinity(b)-affinity(a)||a.row.sheet_row-b.row.sheet_row;
+      const m=window.filter(p=>p.gender==='MAN').sort(rank).slice(0,men),f=window.filter(p=>p.gender==='WOMAN').sort(rank).slice(0,size-men);
+      if(m.length!==men||f.length!==size-men)continue;const candidate=[...m,...f],quality=score(candidate);
+      if(quality>best){best=quality;selected=candidate;}
+     }
+    }
+    if(selected)break;
+   }
+   if(!selected)break;
+   consume(selected,(['PAST','UPCOMING','RECRUITING','UPCOMING','PAST'] as const)[turn%5]);turn++;
   }
+  while(pool.length)consume(pool.slice(0,6),'RECRUITING');
  }
+ for(const g of groups)if(g.cohort!=='RECRUITING'&&!isAllowedGenderComposition(g.people))throw Error('Invalid showcase gender composition.');
  return {people,groups};
 }
 export function showcaseThursday(now=new Date()){

@@ -1,3 +1,4 @@
+import {isAllowedGenderComposition} from '@/lib/matching';
 import {retireApplicationProposals} from '@/lib/matching-review';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -32,8 +33,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await client.query("UPDATE availability_registrations SET status='CANCELLED' WHERE application_id=$1",[id]);
     await client.query(`UPDATE table_members SET status='REMOVED' WHERE application_id=$1 AND status='ACTIVE'`, [id]);
     if (row.table_id) {
-      const remaining = await client.query<any>(`SELECT count(*)::int count FROM table_members WHERE table_id=$1 AND status='ACTIVE'`, [row.table_id], `SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'`);
-      if (Number(remaining.rows[0]?.count ?? 0) < 4) {
+      const remaining = await client.query<any>(`SELECT p.gender FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id WHERE tm.table_id=$1 AND tm.status='ACTIVE'`, [row.table_id], `SELECT p.gender FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id WHERE tm.table_id=$1 AND tm.status='ACTIVE'`);
+      if (!isAllowedGenderComposition(remaining.rows)) {
         await client.query(`UPDATE dining_tables SET status='EXCEPTION' WHERE id=$1`, [row.table_id]);
         await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,now()) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=now(),last_error=NULL`, [`repair:${row.table_id}:${id}`, JSON.stringify({ tableId: row.table_id, eventId: row.event_id })], `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO UPDATE SET status='PENDING',next_attempt_at=CURRENT_TIMESTAMP,last_error=NULL`);
       }

@@ -52,3 +52,7 @@ python3 tests/showcase-browser.py --base http://localhost:3101
 360·390·430·1440px에서 화면 넘침, 세 상태, URL 탭/새로고침/뒤로가기, 본인 대화·지난 대화, 계정별 권한, 원본 294행 연결을 확인합니다. 기본 결과 경로는 Git 제외 `.data/showcase-browser/`입니다. 운영 계정 옵션을 사용하면 테스트 메시지를 전송하지 않습니다.
 
 최종 신청 화면의 날짜·지역 중복 제거, 가격과 라디오 간격, 결제 결과 선택의 접근성 이름, 키보드 본문 이동은 `python3 tests/showcase-reviewed-browser.py --base <URL>`로 확인합니다. 운영 계정은 같은 `--credentials` 옵션을 사용하며 결제 요청은 전송하지 않습니다.
+
+## 성비·회차 참가자 목록
+
+`tests/gender-composition.test.ts`와 자동 매칭 테스트는 허용된 여섯 조합과 승인·취소·충원·프로필 변경 경계를 검사합니다. `python3 tests/gender-browser.py --base <URL> [--credentials <보호 JSON>]`는 실제 설문 294행 연결, 식탁 성비·연령, 네 화면 폭의 참가자 목록과 여러 회차 중복 집계를 확인합니다. 결과는 기본 `.data/gender-browser/`에 저장합니다.

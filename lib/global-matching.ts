@@ -1,4 +1,4 @@
-import {groupScore,isHardCompatible,preferredSize,type MatchCandidate,type MatchGroup} from './matching';
+import {isAllowedGenderComposition,groupScore,isHardCompatible,preferredSize,type MatchCandidate,type MatchGroup} from './matching';
 import type {MatchingPolicy,matchingInput} from './matching-policy';
 
 type Input=Awaited<ReturnType<typeof matchingInput>>;
@@ -39,7 +39,7 @@ export function globalMatching(input:Input,override?:MatchingPolicy){
      let nodes=0;
      const find=(start:number,members:MatchCandidate[]):boolean=>{
       if(++nodes>2000)return false;
-      if(members.length===size){if(groupScore(members,policy.weights)<policy.minScore)return false;chosen=members;return true;}
+      if(members.length===size){if(!isAllowedGenderComposition(members)||groupScore(members,policy.weights)<policy.minScore)return false;chosen=members;return true;}
       for(let i=start;i<=pool.length-(size-members.length);i++)if(isHardCompatible(members,pool[i],0,policy.weights)&&find(i+1,[...members,pool[i]]))return true;
       return false;
      };
@@ -74,7 +74,7 @@ export function globalMatching(input:Input,override?:MatchingPolicy){
     let local=0;
     const visit=(start:number,members:MatchCandidate[])=>{
      if(++exploredNodes>budget||++local>localBudget){limited=true;return;}
-     if(members.length>=4&&groupScore(members,policy.weights)>=policy.minScore){
+     if(isAllowedGenderComposition(members)&&groupScore(members,policy.weights)>=policy.minScore){
       const score=groupScore(members,policy.weights),group:Group={members,eventId:event.id,policy,score,explanation:''};
       const key=[...state.groups,group].map(g=>`${g.eventId}:${g.members.map(m=>m.applicationId).sort().join(',')}`).sort().join('|');
       const result:State={groups:[...state.groups,group],used:new Set([...state.used,...members.map(m=>m.applicationId)]),skipped:state.skipped,seats:new Map(state.seats).set(event.id,(state.seats.get(event.id)??0)+members.length),count:state.count+members.length,cost:state.cost+members.reduce((n,m)=>n+rank(m,event.id),0),quality:state.quality+score*members.length,key};

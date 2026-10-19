@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { apiUser } from '@/lib/auth';
-import { db } from '@/lib/db';
+import {isAllowedGenderComposition} from '@/lib/matching';
+import { databaseProvider,db } from '@/lib/db';
 import {profileInput} from '@/lib/profile-validation';
 import { sameOrigin } from '@/lib/http';
 import {PROFILE_TEST_VERSION,profileTestResult,validProfileTestAnswers} from '@/lib/profile-test';
@@ -39,6 +40,16 @@ export async function PUT(request: Request) {
     if(Object.keys(fields).length)return NextResponse.json({error:Object.values(fields)[0],fields},{status:400});
 
     await client.query('BEGIN');
+    if(databaseProvider==='postgres')await client.query("SELECT pg_advisory_xact_lock(hashtextextended('todaytable:lifecycle',0))");
+    const prior=(await client.query<any>('SELECT gender FROM profiles WHERE user_id=$1',[user.id])).rows[0];
+    if(prior&&prior.gender!==body.gender){
+      const seats=(await client.query<any>(`SELECT tm.table_id,tm.user_id,p.gender FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id JOIN dining_tables t ON t.id=tm.table_id JOIN events e ON e.id=t.event_id WHERE tm.status='ACTIVE' AND t.status='CONFIRMED' AND COALESCE(e.ends_at,e.starts_at+interval '2 hours')>now() AND tm.table_id IN (SELECT table_id FROM table_members WHERE user_id=$1 AND status='ACTIVE')`,[user.id],`SELECT tm.table_id,tm.user_id,p.gender FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id JOIN dining_tables t ON t.id=tm.table_id JOIN events e ON e.id=t.event_id WHERE tm.status='ACTIVE' AND t.status='CONFIRMED' AND COALESCE(e.ends_at,datetime(e.starts_at,'+2 hours'))>CURRENT_TIMESTAMP AND tm.table_id IN (SELECT table_id FROM table_members WHERE user_id=$1 AND status='ACTIVE')`)).rows;
+      const invalid=[...new Set(seats.map(s=>s.table_id))].some(id=>{
+        const members=seats.filter(s=>s.table_id===id).map(s=>({gender:s.user_id===user.id?body.gender:s.gender}));
+        return !isAllowedGenderComposition(members);
+      });
+      if(invalid){await client.query('ROLLBACK');const error='확정된 만남의 성비 조건이 달라져 운영팀 확인이 필요합니다.';return NextResponse.json({error,fields:{gender:error}},{status:409});}
+    }
     await client.query(
       `INSERT INTO profiles(
          user_id,display_name,contact_phone,birth_year,gender,occupation,mbti,

@@ -6,7 +6,7 @@ import {conversationQuestions} from './table-experience';
 import {normalizeInterests} from './feedback-domain';
 import { createHash, randomUUID } from 'node:crypto';
 import { databaseProvider, db, type QueryClient } from './db';
-import { buildDeterministicGroups, isHardCompatible, groupScore, type MatchCandidate, type MatchWeights } from './matching';
+import { isAllowedGenderComposition, buildDeterministicGroups, isHardCompatible, groupScore, type MatchCandidate, type MatchWeights } from './matching';
 
 import {matchingInput,effectivePolicy,explainGroup,enrichCandidates,matchingPlan} from './matching-policy';
 
@@ -22,6 +22,7 @@ function deterministicUuid(value: string): string {
 export type MatchingRun = { runId: string; matchedCount: number; qualityScore: number; unmatched: string[]; groups: string[][] };
 
 export async function provisionTable(client: QueryClient, tableId: string, eventId: string, members: MatchCandidate[], selectedVenueId?:string) {
+  if(!isAllowedGenderComposition(members))throw Object.assign(new Error('허용된 성비 조합만 확정할 수 있습니다.'),{status:409});
   if (databaseProvider === 'sqlite') {
     const exists = await client.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='journey_rooms'", [], "SELECT name FROM sqlite_master WHERE type='table' AND name='journey_rooms'");
     if (!exists.rowCount) return;
@@ -98,8 +99,8 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     if (!table.rowCount) throw new Error('Repair table not found.');
     // The persisted event is authoritative after an earlier repair moves the table.
     const actualEventId = table.rows[0].event_id;
-    const activeCount=await client.query<any>("SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'",[tableId]);
-    if(table.rows[0].status==='CONFIRMED'&&Number(activeCount.rows[0]?.count??0)>=4){if(own)await client.query('COMMIT');return {status:'REPAIRED',tableId};}
+    const activeCount=await client.query<any>("SELECT p.gender FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id WHERE tm.table_id=$1 AND tm.status='ACTIVE'",[tableId]);
+    if(table.rows[0].status==='CONFIRMED'&&isAllowedGenderComposition(activeCount.rows)){if(own)await client.query('COMMIT');return {status:'REPAIRED',tableId};}
     if(proposalOnly){
     const {offerVacantSeats}=await import('./waitlist');
     await offerVacantSeats(client);
@@ -167,11 +168,11 @@ export async function repairTable(tableId: string, eventId?: string, connection?
       let eventBest:MatchCandidate[]|undefined;let explored=0;
       const choose=(start:number,group:MatchCandidate[])=>{
         if(++explored>50000)return;
-        if(group.length>=4&&group.length<=6&&required.every(x=>group.some(y=>y.applicationId===x.applicationId))&&groupScore(group,weights)>=minScore&&(!eventBest||groupScore(group,weights)>groupScore(eventBest,weights)))eventBest=group.slice();
+        if(isAllowedGenderComposition(group)&&required.every(x=>group.some(y=>y.applicationId===x.applicationId))&&groupScore(group,weights)>=minScore&&(!eventBest||groupScore(group,weights)>groupScore(eventBest,weights)))eventBest=group.slice();
         if(group.length===6)return;
         for(let i=start;i<extras.length;i++){const x=extras[i];if(isHardCompatible(group,x,minScore,weights))choose(i+1,[...group,x]);}
       };
-      if(ordered.length>=4) eventBest=ordered.slice(); else choose(0,ordered);
+      if(isAllowedGenderComposition(ordered)) eventBest=ordered.slice(); else choose(0,ordered);
       if(!eventBest) continue;
       const occupied=await client.query<any>(`SELECT count(*)::int count FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND t.id<>$2 AND tm.status='ACTIVE'`,[event.id,tableId],`SELECT count(*) count FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND t.id<>$2 AND tm.status='ACTIVE'`);
       if(Number(occupied.rows[0]?.count??0)+eventBest.length>Number(event.capacity)) continue;

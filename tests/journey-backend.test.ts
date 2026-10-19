@@ -25,7 +25,7 @@ test('real SQLite worker slice provisions reservation, room, topics, attendance 
   const event = (await db.query<any>(`INSERT INTO events(title,starts_at,application_deadline,area,capacity,price_cents,created_by,venue_id) VALUES('journey',datetime('now','+2 day'),datetime('now','-1 minute'),'홍대/합정',6,8000,$1,$2) RETURNING id`, [admin, venue])).rows[0].id;
   for (let i = 0; i < 4; i += 1) {
     const user = (await db.query<any>(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`journey-${randomUUID()}@test.invalid`])).rows[0].id;
-    await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',1990,'PREFER_NOT_TO_SAY','INTJ','["음악","여행"]','["대화"]','["대화"]',1,1,CURRENT_TIMESTAMP)`, [user, `J${i}`]);
+    await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',1990,'${i%2?'WOMAN':'MAN'}','INTJ','["음악","여행"]','["대화"]','["대화"]',1,1,CURRENT_TIMESTAMP)`, [user, `J${i}`]);
     const application = (await db.query<any>(`INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents) VALUES($1,$2,'SINGLE',1,8000) RETURNING id`, [user, randomUUID()])).rows[0].id;
     const payment = (await db.query<any>(`INSERT INTO payments(application_id,idempotency_key,amount_cents,status) VALUES($1,$2,8000,'PAID') RETURNING id`, [application, `pay-${application}`])).rows[0].id;
     await db.query(`INSERT INTO application_options(application_id,event_id) VALUES($1,$2)`, [application, event]);

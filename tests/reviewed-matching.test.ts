@@ -19,7 +19,7 @@ test('availability waits for cutoff, worker confirms automatically, and explicit
   const users:string[]=[],tokens:string[]=[];
   for(let i=0;i<13;i++){
    const id=(await db.query<any>("INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id",[`member${i}@todaytable`])).rows[0].id;users.push(id);
-   await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,food_budgets,consent_privacy,consent_operations) VALUES($1,$2,'01012345678',1995,'PREFER_NOT_TO_SAY','ENFP',$3,$4,true,true)`,[id,`멤버${i}`,['음악','영화·드라마'],['ANY']]);
+   await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,food_budgets,consent_privacy,consent_operations) VALUES($1,$2,'01012345678',1995,'${i%2?'WOMAN':'MAN'}','ENFP',$3,$4,true,true)`,[id,`멤버${i}`,['음악','영화·드라마'],['ANY']]);
   }
   for(const id of [admin,...users]){const token=randomUUID();tokens.push(token);await db.query('INSERT INTO sessions(user_id,token_hash,expires_at) VALUES($1,$2,$3)',[id,tokenHash(token),new Date(Date.now()+3600000)]);}
   const request=(path:string,index:number,body?:any)=>new Request('http://localhost'+path,{headers:{origin:'http://localhost','content-type':'application/json',cookie:`todaytable_session=${tokens[index]}`},...(body?{method:'POST',body:JSON.stringify(body)}:{})});

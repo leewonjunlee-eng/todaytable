@@ -355,7 +355,7 @@ test('core lifecycle matches eligible cohorts and persists privacy-safe explanat
   for (let i = 0; i < 8; i += 1) {
     const u = await client.query(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`core-${randomUUID()}@test.invalid`]);
     const userId = u.rows[0].id;
-    await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',${1985 + (i % 7)},'PREFER_NOT_TO_SAY','INTJ',ARRAY['음악'],ARRAY['깊은 대화를 좋아함'],ARRAY['깊은 대화가 되는 사람'],true,true,now())`, [userId, `Core ${i}`]);
+    await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',${1985 + (i % 7)},'${i%2?'WOMAN':'MAN'}','INTJ',ARRAY['음악'],ARRAY['깊은 대화를 좋아함'],ARRAY['깊은 대화가 되는 사람'],true,true,now())`, [userId, `Core ${i}`]);
     const a = await client.query(`INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents) VALUES($1,$2,'SINGLE',1,8000) RETURNING id`, [userId, randomUUID()]);
     const appId = a.rows[0].id as string;
     const p = await client.query(`INSERT INTO payments(application_id,idempotency_key,amount_cents,status) VALUES($1,$2,8000,'PAID') RETURNING id`, [appId, `core-pay:${appId}`]);

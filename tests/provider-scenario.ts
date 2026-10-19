@@ -23,7 +23,7 @@ for (let i = 0; i < 4; i += 1) {
   const user = (await db.query<any>(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`p-${randomUUID()}@test.invalid`])).rows[0].id;
 const interests = provider === 'postgres' ? '{음악,여행}' : '["음악","여행"]';
   const traits = provider === 'postgres' ? '{대화}' : '["대화"]';
-  await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',1990,'PREFER_NOT_TO_SAY','INTJ',${provider === 'postgres' ? '$3::text[]' : '$3'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? 'true' : '1'},${provider === 'postgres' ? 'true' : '1'},now())`, [user, `P${i}`, interests, traits]);
+  await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',1990,'${i%2?'WOMAN':'MAN'}','INTJ',${provider === 'postgres' ? '$3::text[]' : '$3'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? '$4::text[]' : '$4'},${provider === 'postgres' ? 'true' : '1'},${provider === 'postgres' ? 'true' : '1'},now())`, [user, `P${i}`, interests, traits]);
   const result = await submitApplication(user, { eventIds: [event], pass: 'SINGLE', requestKey: randomUUID() });
   assert.equal(result.payment, 'PAID'); users.push(user);
 }

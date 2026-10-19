@@ -18,7 +18,7 @@ test('SQLite lifecycle persists deterministic 4+4 groups and rejects a 9-year sp
   fixtureEvent=event;
   for (let i=0;i<8;i+=1) {
     const user=(await db.query<any>(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`,[`u-${randomUUID()}@test.invalid`])).rows[0].id;
-    await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',${1990+i%7},'PREFER_NOT_TO_SAY','INTJ','["음악"]','["깊은 대화를 좋아함"]','["깊은 대화가 되는 사람"]',1,1,CURRENT_TIMESTAMP)`,[user,`U${i}`]);
+    await db.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,interests,traits,desired_traits,consent_privacy,consent_operations,consented_at) VALUES($1,$2,'010',${1990+i%7},'${i%2?'WOMAN':'MAN'}','INTJ','["음악"]','["깊은 대화를 좋아함"]','["깊은 대화가 되는 사람"]',1,1,CURRENT_TIMESTAMP)`,[user,`U${i}`]);
     const app=(await db.query<any>(`INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents) VALUES($1,$2,'SINGLE',1,8000) RETURNING id`,[user,randomUUID()])).rows[0].id;
     fixtureApps.push(app);
     const pay=(await db.query<any>(`INSERT INTO payments(application_id,idempotency_key,amount_cents,status) VALUES($1,$2,8000,'PAID') RETURNING id`,[app,`p-${app}`])).rows[0].id;
@@ -34,17 +34,17 @@ test('repairTable fills a three-person table with a paid, consented eligible app
   const { provisionTable } = await import('../lib/lifecycle-service');
   await db.query("INSERT INTO venues(name,area,address,capacity) VALUES('Repair venue','홍대/합정','test address',100)");
   const provision = async (eventId: string) => {
-    const rows = (await db.query<any>("SELECT application_id,user_id FROM table_members WHERE table_id=$1 AND status='ACTIVE'", [table])).rows;
+    const rows = (await db.query<any>("SELECT tm.application_id,tm.user_id,p.gender FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id WHERE tm.table_id=$1 AND tm.status='ACTIVE'", [table])).rows;
     const client = await db.connect();
     try {
       await client.query('BEGIN');
-      await provisionTable(client, table, eventId, rows.map(r => ({ applicationId:r.application_id,userId:r.user_id,birthYear:1992,gender:'WOMAN',mbti:'INTJ',interests:[],traits:[],desiredTraits:[],eventIds:[eventId],paid:true,valid:true })));
+      await provisionTable(client, table, eventId, rows.map(r => ({ applicationId:r.application_id,userId:r.user_id,birthYear:1992,gender:r.gender,mbti:'INTJ',interests:[],traits:[],desiredTraits:[],eventIds:[eventId],paid:true,valid:true })));
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   };
   await provision(fixtureEvent);
   const oldJobs = (await db.query<any>("SELECT id FROM scheduled_jobs WHERE json_extract(payload,'$.tableId')=$1 AND job_type='JOURNEY_FEEDBACK_REQUEST'", [table])).rows;
-  const removed=(await db.query<any>("SELECT application_id FROM table_members WHERE table_id=$1 AND status='ACTIVE' ORDER BY user_id LIMIT 1",[table])).rows[0].application_id;
+  const removed=(await db.query<any>("SELECT tm.application_id FROM table_members tm JOIN profiles p ON p.user_id=tm.user_id WHERE tm.table_id=$1 AND tm.status='ACTIVE' ORDER BY CASE WHEN p.gender='WOMAN' THEN 0 ELSE 1 END,tm.user_id LIMIT 1",[table])).rows[0].application_id;
   await db.query("UPDATE table_members SET status='REMOVED' WHERE table_id=$1 AND application_id=$2",[table,removed]);
   await db.query("UPDATE applications SET status='CANCELED',matching_status='NO_MATCH' WHERE id=$1",[removed]);
   const alternate=(await db.query<any>(`INSERT INTO events(title,starts_at,application_deadline,area,capacity,price_cents,created_by) VALUES('alternate',datetime('now','+2 day'),datetime('now','-1 minute'),'홍대/합정',20,8000,(SELECT id FROM users WHERE role='ADMIN' LIMIT 1)) RETURNING id`,[])).rows[0].id;
