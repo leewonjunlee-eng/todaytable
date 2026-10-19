@@ -8,7 +8,7 @@ function display(key: string, value: unknown) { if (key === 'amount_cents') retu
 
 function AdminTable({ title, rows, columns, action }: { title: string; rows: any[]; columns: string[]; action?: (row: any) => ReactNode }) { return <section className="panel admin-table"><h2>{title}</h2>{rows.length === 0 ? <p>표시할 데이터가 없어요.</p> : <div className="table-scroll"><table><thead><tr>{columns.map(column => <th key={column}>{labels[column] || column}</th>)}{action && <th>작업</th>}</tr></thead><tbody>{rows.map((row: any, index: number) => <tr key={row.id || index}>{columns.map(column => <td key={column}>{display(column, row[column])}</td>)}{action && <td>{action(row)}</td>}</tr>)}</tbody></table></div>}</section>; }
 
-function ReportReview({ row, onDone }: { row: any; onDone: () => Promise<void> }) {
+export function ReportReview({ row, onDone }: { row: any; onDone: () => Promise<void> }) {
   const [decision, setDecision] = useState('');
   const [note, setNote] = useState('');
   const [confirm, setConfirm] = useState(false);

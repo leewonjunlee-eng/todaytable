@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { apiUser } from '@/lib/auth';
+import {requestOperator} from '@/lib/operators';
 import { convertSourceResponse, listSourceResponses, removeSourceConversion } from '@/lib/source-data';
 import { sameOrigin } from '@/lib/http';
 
 export async function GET(request: Request) {
-  const user = await apiUser(request, true);
+  const user = await requestOperator(request);
   if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
   const url = new URL(request.url);
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await apiUser(request, true);
+  const user = await requestOperator(request);
   if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
   if (!sameOrigin(request)) return NextResponse.json({ error: '요청 출처 오류' }, { status: 403 });
   try {
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const user = await apiUser(request, true);
+  const user = await requestOperator(request);
   if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
   if (!sameOrigin(request)) return NextResponse.json({ error: '요청 출처 오류' }, { status: 403 });
   try {

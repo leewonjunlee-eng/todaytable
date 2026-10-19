@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { apiUser } from '@/lib/auth';
+import {requestOperator} from '@/lib/operators';
 import {updatePreferenceSignals} from '@/lib/feedback-service';
 import { db } from '@/lib/db';
 import { sameOrigin } from '@/lib/http';
@@ -8,7 +8,7 @@ import { isCanonicalUuid } from '@/lib/domain';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
-  const user = await apiUser(request, true); if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
+  const user = await requestOperator(request); if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
   const [tables, jobs, exceptions, reports, attendance, notifications, feedback] = await Promise.all([
     db.query(`SELECT t.id,e.title,e.area,e.starts_at,t.status,count(tm.user_id)::int member_count,v.name venue_name FROM dining_tables t JOIN events e ON e.id=t.event_id LEFT JOIN table_members tm ON tm.table_id=t.id AND tm.status='ACTIVE' LEFT JOIN venues v ON v.id=t.venue_id GROUP BY t.id,e.title,e.area,e.starts_at,t.status,v.name ORDER BY e.starts_at DESC LIMIT 100`, [], `SELECT t.id,e.title,e.area,e.starts_at,t.status,count(tm.user_id) member_count,v.name venue_name FROM dining_tables t JOIN events e ON e.id=t.event_id LEFT JOIN table_members tm ON tm.table_id=t.id AND tm.status='ACTIVE' LEFT JOIN venues v ON v.id=t.venue_id GROUP BY t.id,e.title,e.area,e.starts_at,t.status,v.name ORDER BY e.starts_at DESC LIMIT 100`),
     db.query(`SELECT id,job_type,status,attempts,last_error,job_key FROM scheduled_jobs ORDER BY created_at DESC LIMIT 100`),
@@ -48,9 +48,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await apiUser(request, true); if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
+  const user = await requestOperator(request); if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
   if (!sameOrigin(request)) return NextResponse.json({ error: '요청 출처를 확인할 수 없습니다.' }, { status: 403 });
-  const body = await request.json().catch(() => ({})); if (typeof body.action !== 'string' || typeof body.id !== 'string' || !isCanonicalUuid(body.id)) return NextResponse.json({ error: '작업 형식이 올바르지 않습니다.' }, { status: 400 });
+  const body = await request.json().catch(() => ({})); if (typeof body.action !== 'string' || typeof body.id !== 'string' || !(isCanonicalUuid(body.id)||/^[a-f0-9]{32}$/i.test(body.id))) return NextResponse.json({ error: '작업 형식이 올바르지 않습니다.' }, { status: 400 });
   const client = await db.connect();
   let result: { body: Record<string, unknown>; status: number } = { body: { ok: true }, status: 200 };
   try {
@@ -75,13 +75,19 @@ export async function POST(request: Request) {
       }
     } else if (body.action === 'RESOLVE_EXCEPTION') {
       if (!['RESOLVED','OPEN'].includes(body.status)) result = { body: { error: '예외 상태가 올바르지 않습니다.' }, status: 400 };
-      else { const updated = await client.query(`UPDATE lifecycle_exceptions SET status=$2,resolved_at=CASE WHEN $2='RESOLVED' THEN now() ELSE NULL END,resolved_by=$3 WHERE id=$1`, [body.id, body.status, user.id]); if (!updated.rowCount) result = { body: { error: '예외를 찾을 수 없습니다.' }, status: 404 }; }
+      else { const updated = await client.query(`UPDATE lifecycle_exceptions SET status=$2,resolved_at=CASE WHEN $2='RESOLVED' THEN now() ELSE NULL END,resolved_by=$3 WHERE id=$1`, [body.id, body.status, user.id]); if (!updated.rowCount) result = { body: { error: '예외를 찾을 수 없습니다.' }, status: 404 }; else if(body.status==='RESOLVED')await client.query('UPDATE operator_work_sessions SET ended_at=CURRENT_TIMESTAMP WHERE exception_id=$1 AND ended_at IS NULL',[body.id]); }
     } else if (body.action === 'REVIEW_REPORT') {
-      if (!['warning', 'suspend', 'permanent', 'dismiss'].includes(body.decision)) result = { body: { error: '결정 형식이 올바르지 않습니다.' }, status: 400 };
-      else { const report = await client.query<any>(`SELECT target_user_id FROM safety_reports WHERE id=$1 FOR UPDATE`, [body.id]); if (!report.rowCount) result = { body: { error: '신고를 찾을 수 없습니다.' }, status: 404 }; else { const decision = ({ warning: 'WARNING', suspend: 'SUSPEND', permanent: 'PERMANENT', dismiss: 'DISMISSED' } as Record<string, string>)[body.decision]; await client.query(`UPDATE safety_reports SET decision=$2,note=$3,reviewed_at=now(),reviewed_by=$4 WHERE id=$1`, [body.id, decision, body.note ?? null, user.id]); if (decision === 'SUSPEND' || decision === 'PERMANENT') await client.query(`UPDATE users SET restricted_status=$2 WHERE id=$1`, [report.rows[0].target_user_id, decision === 'SUSPEND' ? 'SUSPENDED' : 'PERMANENT']); } }
+      if (!['warning', 'suspend', 'permanent', 'dismiss'].includes(body.decision)||typeof body.note!=='string'||body.note.trim().length<2||body.note.length>2000) result = { body: { error: '결정 형식이 올바르지 않습니다.' }, status: 400 };
+      else { const report = await client.query<any>(`SELECT target_user_id,decision FROM safety_reports WHERE id=$1 FOR UPDATE`, [body.id]); if (!report.rowCount) result = { body: { error: '신고를 찾을 수 없습니다.' }, status: 404 }; else if(report.rows[0].decision!=='OPEN')result={body:{error:'이미 처리된 신고입니다. 최신 기록을 확인해 주세요.'},status:409}; else { const decision = ({ warning: 'WARNING', suspend: 'SUSPEND', permanent: 'PERMANENT', dismiss: 'DISMISSED' } as Record<string, string>)[body.decision]; await client.query(`UPDATE safety_reports SET decision=$2,note=$3,reviewed_at=now(),reviewed_by=$4 WHERE id=$1`, [body.id, decision, body.note ?? null, user.id]); if (decision === 'SUSPEND' || decision === 'PERMANENT') await client.query(`UPDATE users SET restricted_status=$2 WHERE id=$1`, [report.rows[0].target_user_id, decision === 'SUSPEND' ? 'SUSPENDED' : 'PERMANENT']); } }
     } else if (body.action === 'SET_ATTENDANCE') {
       if (!['ATTENDED', 'NO_SHOW', 'SCHEDULED'].includes(body.status)) result = { body: { error: '참석 상태가 올바르지 않습니다.' }, status: 400 };
-      else { const updated = await client.query(`UPDATE attendance_records SET status=$2,checked_by=$3,checked_at=now(),updated_at=now() WHERE id=$1`, [body.id, body.status, user.id]); if (!updated.rowCount) result = { body: { error: '참석 기록을 찾을 수 없습니다.' }, status: 404 }; else await updatePreferenceSignals(client); }
+      else {
+        const before=await client.query<any>(`SELECT ar.status,e.starts_at,COALESCE(e.ends_at,e.starts_at+interval '2 hours') ends_at FROM attendance_records ar JOIN events e ON e.id=ar.event_id WHERE ar.id=$1 FOR UPDATE OF ar`,[body.id],`SELECT ar.status,e.starts_at,COALESCE(e.ends_at,datetime(e.starts_at,'+2 hours')) ends_at FROM attendance_records ar JOIN events e ON e.id=ar.event_id WHERE ar.id=$1`);
+        if(!before.rowCount)result={body:{error:'참석 기록을 찾을 수 없습니다.'},status:404};
+        else if(body.expectedStatus!==undefined&&body.expectedStatus!==before.rows[0].status)result={body:{error:'참석 기록이 변경됐습니다. 최신 내용을 확인해 주세요.'},status:409};
+        else if(+new Date(before.rows[0].starts_at)>Date.now()||(body.status==='NO_SHOW'&&+new Date(before.rows[0].ends_at)>Date.now()))result={body:{error:'행사 시작 전 참석 처리나 종료 전 노쇼 처리는 할 수 없습니다.'},status:409};
+        else {await client.query(`UPDATE attendance_records SET status=$2,checked_by=$3,checked_at=now(),updated_at=now() WHERE id=$1`, [body.id,body.status,user.id]);await updatePreferenceSignals(client);}
+      }
     } else result = { body: { error: '지원하지 않는 작업입니다.' }, status: 400 };
     if (result.status === 200) await client.query(`INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id,after_data) VALUES($1,$2,'admin_action',$3,$4)`, [user.id, body.action, body.id, JSON.stringify(body)]);
     await client.query(result.status === 200 ? 'COMMIT' : 'ROLLBACK');

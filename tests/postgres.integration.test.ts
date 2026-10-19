@@ -97,6 +97,7 @@ test('application replay is concurrency-safe, reuses payment, debits owned passe
   const otherUser = await client.query(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`${randomUUID()}@test.invalid`]);
   const admin = await client.query(`INSERT INTO users(email,password_hash,role) VALUES($1,'x','ADMIN') RETURNING id`, [`${randomUUID()}@test.invalid`]);
   adminUserId = admin.rows[0].id;
+    await client.query("INSERT INTO operator_profiles(user_id,display_name,team_role) VALUES($1,'통합 검증 운영자','OWNER') ON CONFLICT(user_id) DO NOTHING", [adminUserId]);
   await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Test','01000000000',1990,'PREFER_NOT_TO_SAY','INTJ',true,true,now())`, [userId]);
   await client.query(`INSERT INTO profiles(user_id,display_name,contact_phone,birth_year,gender,mbti,consent_privacy,consent_operations,consented_at) VALUES($1,'Other','01000000001',1990,'PREFER_NOT_TO_SAY','INTJ',true,true,now())`, [otherUser.rows[0].id]);
   const intruder = await client.query(`INSERT INTO users(email,password_hash) VALUES($1,'x') RETURNING id`, [`${randomUUID()}@test.invalid`]);

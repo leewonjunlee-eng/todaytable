@@ -1,4 +1,4 @@
 import {requireAdmin} from '@/lib/auth';
-import {AdminDashboardView} from '@/components/admin-journey';
+import {OperationsAnalytics} from '@/components/operations-analytics';
 export const dynamic='force-dynamic';
-export default async function AdminHome(){await requireAdmin();return <><AdminDashboardView/><div className="page"><a className="button-secondary" href="/admin/source-data">참가 설문 관리</a></div></>;}
+export default async function AdminHome(){await requireAdmin();return <OperationsAnalytics/>;}

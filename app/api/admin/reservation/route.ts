@@ -1,11 +1,11 @@
-import { apiUser } from '@/lib/auth';
+import {requestOperator} from '@/lib/operators';
 import { db } from '@/lib/db';
 import { sameOrigin } from '@/lib/http';
 import { isCanonicalUuid } from '@/lib/domain';
 import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
-  const admin = await apiUser(request, true);
+  const admin = await requestOperator(request);
   if (!admin) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
   if (!sameOrigin(request)) return NextResponse.json({ error: '요청 출처를 확인할 수 없습니다.' }, { status: 403 });
   const body = await request.json().catch(() => ({}));

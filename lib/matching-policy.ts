@@ -1,18 +1,21 @@
+import {globalMatching} from './global-matching';
 import {normalizeInterests} from './feedback-domain';
 import {createHash} from 'node:crypto';
 import {db,type QueryClient} from './db';
 import {parseJson,problem} from './operators';
-import {buildDeterministicGroups,type MatchCandidate,type MatchWeights,type MatchGroup} from './matching';
+import {MATCH_ENGINE_VERSION,buildDeterministicGroups,type MatchCandidate,type MatchWeights,type MatchGroup} from './matching';
+import {outcomeWeightEvidence} from './matching-learning';
 export const POLICY_PRESETS=[
+ {id:'prd-v2',name:'운영 기본형',description:'필수 조건을 지키고 성비, MBTI, 관심사, 성향 순으로 구성해요.',weights:{gender:.4,mbti:.25,interests:.2,traits:.1,novelty:.05}},
  {id:'balanced-v1',name:'균형형',description:'취향과 새로운 만남, 식탁의 구성을 두루 살펴요.',weights:{gender:.35,mbti:.1,interests:.3,traits:.15,novelty:.1}},
  {id:'affinity-v1',name:'공감·취향형',description:'공통 관심사에서 시작되는 자연스러운 대화를 준비해요.',weights:{gender:.2,mbti:.05,interests:.5,traits:.2,novelty:.05}},
  {id:'discovery-v1',name:'새로운 발견형',description:'처음 만나는 사람과 새로운 관점을 발견해요.',weights:{gender:.25,mbti:.05,interests:.2,traits:.15,novelty:.35}},
  {id:'conversation-v1',name:'편안한 대화형',description:'대화의 분위기와 서로가 원하는 성향을 더 살펴요.',weights:{gender:.2,mbti:.05,interests:.25,traits:.4,novelty:.1}},
 ];
-export type MatchingPolicy={id:string;name:string;description:string;weights:MatchWeights;minScore:number;learningEnabled:boolean};
+export type MatchingPolicy={id:string;name:string;description:string;weights:MatchWeights;minScore:number;learningEnabled:boolean;learningEvidence?:number};
 export async function effectivePolicy(client:Pick<QueryClient,'query'>,eventId:string):Promise<MatchingPolicy>{
  const selected=await client.query<any>(`SELECT p.* FROM matching_policies p WHERE p.id=COALESCE((SELECT policy_id FROM event_policies WHERE event_id=$1),(SELECT policy_id FROM matching_defaults WHERE id=1))`,[eventId]);
- if(selected.rowCount){const p=selected.rows[0];return {id:p.id,name:p.name,description:p.description,weights:parseJson(p.weights,POLICY_PRESETS[0].weights),minScore:Number(p.min_score),learningEnabled:Boolean(p.learning_enabled)};}
+ if(selected.rowCount){const p=selected.rows[0],baseWeights=parseJson<MatchWeights>(p.weights,POLICY_PRESETS[0].weights),learningEnabled=Boolean(p.learning_enabled);const learned=learningEnabled?await outcomeWeightEvidence(client,baseWeights):{weights:baseWeights,sampleCount:0};return {id:p.id,name:p.name,description:p.description,weights:learned.weights,minScore:Number(p.min_score),learningEnabled,learningEvidence:learned.sampleCount};}
  const fallback=(await client.query<any>('SELECT version,min_score,weights FROM matching_rules WHERE id=1')).rows[0];
  return {id:fallback?.version??'core-v1',name:'기존 운영 기준',description:'기존 매칭 규칙',weights:parseJson(fallback?.weights,{gender:.4,mbti:.25,interests:.2,traits:.1,novelty:.05}),minScore:Number(fallback?.min_score??0),learningEnabled:false};
 }
@@ -42,24 +45,15 @@ export async function matchingInput(client:Pick<QueryClient,'query'>,eventId:str
  const active=candidates.filter(c=>c.eventIds.length);const enriched=await enrichCandidates(client,active,true);
  const scopedEvents=events.filter(e=>component.has(e.id));
  const policies:Record<string,MatchingPolicy>={};for(const e of scopedEvents)policies[e.id]=await effectivePolicy(client,e.id);
- const snapshot={eventId,eventState:scopedEvents,candidates:enriched,occupied:seated.filter(s=>component.has(s.event_id)),policies};
+ const snapshot={engineVersion:MATCH_ENGINE_VERSION,eventId,eventState:scopedEvents,candidates:enriched,occupied:seated.filter(s=>component.has(s.event_id)),policies};
  const hash=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
  return {event,events:scopedEvents,candidates:enriched,seated,snapshot,hash,policies};
 }
 export function matchingPlan(input:Awaited<ReturnType<typeof matchingInput>>,override?:MatchingPolicy){
- const groups:Array<MatchGroup&{policy:MatchingPolicy}>=[],used=new Set<string>();
- const events=input.events.slice().sort((a,b)=>new Date(a.application_deadline).getTime()-new Date(b.application_deadline).getTime()||a.id.localeCompare(b.id));
- for(const event of events){
-  const policy=event.id===input.event.id&&override?override:input.policies[event.id];
-  const capacity=Number(event.capacity)-input.seated.filter(s=>s.event_id===event.id).length;
-  if(capacity<4)continue;
-  const candidates=input.candidates.filter(c=>!used.has(c.applicationId)&&c.eventIds.includes(event.id)&&!groups.some(g=>g.members.some(m=>m.userId===c.userId)&&new Date(event.starts_at).getTime()<new Date(input.events.find(e=>e.id===g.eventId)!.ends_at).getTime()&&new Date(input.events.find(e=>e.id===g.eventId)!.starts_at).getTime()<new Date(event.ends_at).getTime()))
-   .map(c=>({...c,eventIds:[event.id],...(!policy.learningEnabled?{atmosphere:undefined,preferredInterests:undefined,learnedInterests:undefined,signalConfidence:undefined}:{})}));
-  const result=buildDeterministicGroups(candidates,`event:${event.id}`,policy.minScore,policy.weights,capacity);
-  for(const group of result.groups){groups.push({...group,policy,explanation:explainGroup(group.members,policy)});for(const m of group.members)used.add(m.applicationId);}
- }
- return {groups,unmatched:input.candidates.filter(c=>!used.has(c.applicationId))};
+ const result=globalMatching(input,override);
+ return {...result,groups:result.groups.map(g=>({...g,explanation:explainGroup(g.members,g.policy)}))};
 }
+
 export function evaluatePolicy(input:Awaited<ReturnType<typeof matchingInput>>,policy:MatchingPolicy){
  const result=matchingPlan(input,policy);
  return {policyId:policy.id,policyName:policy.name,matchedCount:result.groups.reduce((n,g)=>n+g.members.length,0),unmatched:result.unmatched.map(c=>c.applicationId),qualityScore:result.groups.reduce((n,g)=>n+g.score,0),groups:result.groups.map(g=>({eventId:g.eventId,policyId:g.policy.id,score:g.score,members:g.members.map(m=>({applicationId:m.applicationId,userId:m.userId})),explanation:g.explanation})),candidateCount:input.candidates.length};

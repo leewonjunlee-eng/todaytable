@@ -2,6 +2,56 @@
 
 Node.js 22 이상을 사용합니다. 테스트는 SQLite 임시 파일 또는 별도 PostgreSQL 테스트 DB/스키마를 사용합니다. 운영 DB를 테스트 URL로 사용하지 않습니다.
 
+## 최신 릴리스 검증 — 2026-10-19 05:32 UTC
+
+전체 PostgreSQL 구성 81개 통과·실패 0·건너뜀 0, SQLite 기본 구성 76개 통과·PG 전용 5개 건너뜀입니다. DB별 인수 각 20개와 001~028 두 번 이행, 타입 검사 포함 프로덕션 빌드, 최종 빌드 브라우저 113개 검사가 통과했습니다. 운영 사이트 49개 확인과 DB 보존 대조도 완료했습니다. 배포 ID와 실제 근거는 [현재 현황](STATUS.md), 수정 범위·한계는 [릴리스 기록](RELEASE_20261019.md)에 있습니다.
+
+```sh
+TEST_DATABASE_URL=postgres://tt_test@127.0.0.1:55439/todaytable_test \
+TEST_PRODUCT_DATABASE_URL=postgres://tt_test@127.0.0.1:55439/todaytable_test \
+AUTO_TEST_POSTGRES=postgres://tt_test@127.0.0.1:55439/todaytable_test \
+COMPLETION_TEST_POSTGRES=postgres://tt_test@127.0.0.1:55439/todaytable_test \
+OPERATOR_TEST_POSTGRES=1 PROFILE_TEST_POSTGRES=1 VIRTUAL_FINANCE_PROVIDER=postgres npm test
+TEST_DATABASE_URL=postgres://tt_test@127.0.0.1:55439/todaytable_test npm run test:providers
+node tests/operations-settings-browser.mjs
+```
+
+아래 기존 브라우저 준비 절차로 운영·프로필·설정을 실행합니다. 활성 서버의 `.next`를 빌드로 덮어쓰지 않도록, 빌드가 끝난 standalone 출력·static·public을 별도 디렉터리에 복사해 제공합니다. 설정 브라우저는 테스트용 회차와 안내 문구를 변경하므로 로컬 격리 DB에서만 실행합니다. 결제/환불의 추가 브라우저 근거는 `.data/completion-payment-browser-verified.log`이며 백엔드의 재현 가능한 회귀 검증은 `tests/prd-completion.test.ts`, `tests/virtual-payments.test.ts`입니다.
+
+## 10월 19일 이전 검증 및 재실행 자료
+
+## 운영 개편 당시 PRD v0.2 검증 — 2026-10-19
+
+추가 계측 검증: `tests/operator-workspace.test.ts`는 신청 시작 중복 방지와 운영자 전용 작업 시간 시작·종료·분석 집계를 SQLite와 별도 PostgreSQL 스키마에서 확인합니다. `tests/matching-learning.test.ts`는 자료 부족 시 고정 가중치 유지, 20개 이상 실적에서 제한적 자동 조정, 합계 보존을 확인합니다. `npm run typecheck` 통과. 이전 브라우저 결과는 계측 UI 추가 전 기록이므로 해당 새 화면의 검증 근거로 사용하지 않습니다.
+
+운영 메뉴·예약과 신규 가입·선호 테스트의 현재 화면은 아래 스크립트로 확인한다. 아래의 이전 제품 브라우저 시나리오는 과거 화면용 기록이며 최신 UI의 통합 성공 근거로 사용하지 않는다.
+
+```sh
+npm run build
+node --import tsx tests/prepare-operator-browser.ts
+cp -R .next/static .next/standalone/.next/
+cp -R public .next/standalone/
+HOSTNAME=127.0.0.1 PORT=3326 node --env-file=.data/operator-browser.env .next/standalone/server.js
+```
+
+준비 스크립트는 기존 개발 DB 설정을 무시하고 `.data/operator-browser.sqlite`에만 회차·식탁·운영자·예약 상태·신고를 준비한다. 세션과 환경 파일은 Git에서 제외된 `.data`에 저장한다. 별도 터미널에서 실행한다.
+
+```sh
+node tests/operator-workspace-browser.mjs
+node tests/profile-onboarding-browser.mjs
+```
+
+운영 검증은 360·390·430·1440px의 6개 메뉴, 월·연 그래프 조작, 마감 전/후/지난 매칭, 식탁 멤버·단체방·안내·후기, 예약 필터와 실제 저장 응답, 문의함 신고 맥락, 가로 넘침·JavaScript/API 오류를 확인한다. 저장된 예약 메모를 다시 편집할 때도 접근성 이름으로 입력창을 찾아 재실행할 수 있다. 최종 실행에서 60개 확인이 통과했다. 결과·캡처·실행 추적은 `.data/admin-browser/`에 남긴다. 가입·프로필은 모바일 세 너비의 입력 누락 차단·단계 이동·답변 보존·수정·저장·재사용을 확인하고 `.data/profile-browser/`에 남긴다.
+
+자동 매칭·운영·프로필·결제의 PostgreSQL 검증은 다음 환경변수를 사용한다. 각 파일이 별도 임시 스키마를 만들고 정리한다.
+
+```sh
+TEST_DATABASE_URL=postgres://...@127.0.0.1:5432/todaytable_test \
+AUTO_TEST_POSTGRES=postgres://...@127.0.0.1:5432/todaytable_test \
+OPERATOR_TEST_POSTGRES=1 PROFILE_TEST_POSTGRES=1 VIRTUAL_FINANCE_PROVIDER=postgres \
+node --import tsx --test tests/automatic-matching.test.ts tests/operator-workspace.test.ts tests/profile-onboarding.test.ts tests/virtual-payments.test.ts
+```
+
 ## 타입·빌드·DB 검증
 
 ```sh

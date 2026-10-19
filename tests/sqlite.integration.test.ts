@@ -53,6 +53,7 @@ before(async () => {
     participantId = participant.rows[0].id;
     const admin = await db.query<{id:string}>('INSERT INTO users(email,password_hash,role) VALUES($1,$2,\'ADMIN\') RETURNING id', [`sqlite-admin-${randomUUID()}@test.invalid`, await hashPassword('admin-password')]);
     adminId = admin.rows[0].id;
+    await db.query("INSERT INTO operator_profiles(user_id,display_name,team_role) VALUES($1,'통합 검증 운영자','OWNER') ON CONFLICT(user_id) DO NOTHING", [adminId]);
     const intruder = await db.query<{id:string}>('INSERT INTO users(email,password_hash) VALUES($1,$2) RETURNING id', [`sqlite-intruder-${randomUUID()}@test.invalid`, 'placeholder']);
     intruderId = intruder.rows[0].id;
     await db.query(

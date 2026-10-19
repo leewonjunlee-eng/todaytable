@@ -1,4 +1,7 @@
+import {eligibleAlternative,reallocationPriority} from './reallocation';
+import {queueBusinessEvent,deliverBusinessEvent,scheduleLabel} from './business-events';
 import {createMatchingProposal,generateMatchingProposals} from './matching-review';
+import {runAutomaticMatching} from './automatic-matching';
 import {conversationQuestions} from './table-experience';
 import {normalizeInterests} from './feedback-domain';
 import { createHash, randomUUID } from 'node:crypto';
@@ -44,16 +47,24 @@ export async function provisionTable(client: QueryClient, tableId: string, event
     await client.query(`UPDATE events SET venue_id=$2 WHERE id=$1`, [eventId, venueId]);
   }
   await client.query(`UPDATE dining_tables SET venue_id=$2,starts_at=$3,area=$4,capacity=$5,locked_at=now(),provision_status='PROVISIONED' WHERE id=$1`, [tableId, venueId, row.starts_at, row.area, members.length], `UPDATE dining_tables SET venue_id=$2,starts_at=$3,area=$4,capacity=$5,locked_at=CURRENT_TIMESTAMP,provision_status='PROVISIONED' WHERE id=$1`);
-  await client.query(`INSERT INTO table_reservations(table_id,venue_id,reservation_name,meeting_time,status,provider) VALUES($1,$2,$3,$4,'CONFIRMED','MOCK') ON CONFLICT(table_id) DO UPDATE SET venue_id=excluded.venue_id,meeting_time=excluded.meeting_time,status='CONFIRMED'`, [tableId, venueId, `Todaytable ${tableId.slice(0, 8)}`, row.starts_at]);
-  const topics=conversationQuestions(members);
+  await client.query("INSERT INTO venue_booking_tasks(table_id,reservation_name) VALUES($1,$2) ON CONFLICT(table_id) DO NOTHING",[tableId,`우연한 식탁 ${tableId.slice(0,8)}`]);
+  const task=(await client.query<any>('SELECT reservation_name FROM venue_booking_tasks WHERE table_id=$1',[tableId])).rows[0];
+  const reservationName=task.reservation_name;
+  await client.query(`INSERT INTO table_reservations(table_id,venue_id,reservation_name,meeting_time,status,provider) VALUES($1,$2,$3,$4,'CONFIRMED','MOCK') ON CONFLICT(table_id) DO UPDATE SET venue_id=excluded.venue_id,reservation_name=excluded.reservation_name,meeting_time=excluded.meeting_time,status='CONFIRMED'`, [tableId, venueId, reservationName, row.starts_at]);
+  const destination=(await client.query<any>('SELECT name,address FROM venues WHERE id=$1',[venueId])).rows[0];
+  const time=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',weekday:'long',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(row.starts_at));
+  const announcement=`식탁이 확정되었어요. ${time} · ${destination?.name??'식당 안내 확인'} · ${destination?.address??row.area} · 예약명: ${reservationName}. 식사비는 각자 부담합니다. 시작 48시간 전까지 취소 시 환불 또는 참가권 복원이 가능하며, 이후에는 환불·복원이 제한됩니다. 당일에는 취소할 수 없습니다. 시간·장소 변경은 이 방에서 알려드려요.`;
+  const {selectTableContent}=await import('./table-content');
+  const selectedContent=await selectTableContent(client,tableId,conversationQuestions(members));
+  const topics=selectedContent.topics;
   const room = randomUUID();
   await client.query(`INSERT INTO journey_rooms(id,table_id,welcome_message,rules_message,curation_message,topics) VALUES($1,$2,$3,$4,$5,${pgJson('$6')}) ON CONFLICT(table_id) DO NOTHING`, [room, tableId, '식탁에 오신 것을 환영해요.', '서로의 경계를 존중하고 개인정보를 공유하지 마세요.', '오늘의 대화 주제를 골라 편안하게 시작해 보세요.', json(topics)], `INSERT INTO journey_rooms(id,table_id,welcome_message,rules_message,curation_message,topics) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(table_id) DO NOTHING`);
   const actualRoom = await client.query<{ id: string }>('SELECT id FROM journey_rooms WHERE table_id=$1', [tableId]);
   const roomId = actualRoom.rows[0].id;
-  for (const [index, message] of ['식탁에 오신 것을 환영해요.', '서로의 경계를 존중하고 개인정보를 공유하지 마세요.', `오늘의 주제: ${topics.join(' · ')}`].entries()) {
-    const requestKey = deterministicUuid(`${roomId}:system:${index}`);
+  for (const [index, message] of [announcement, '서로의 경계를 존중하고 개인정보를 공유하지 마세요. 상대방의 연락처 요청과 사적인 질문은 동의를 구해 주세요.', `오늘의 주제: ${topics.join(' · ')}`].entries()) {
+    const requestKey = deterministicUuid(`${roomId}:system:${index}:${eventId}:${venueId}`);
     try {
-      await client.query(`INSERT INTO journey_messages(id,room_id,author_user_id,body,request_key,kind) VALUES($1,$2,NULL,$3,$4,'SYSTEM') ON CONFLICT(room_id,request_key) DO NOTHING`, [deterministicUuid(`${roomId}:message:${index}`), roomId, message, requestKey]);
+      await client.query(`INSERT INTO journey_messages(id,room_id,author_user_id,body,request_key,kind) VALUES($1,$2,NULL,$3,$4,'SYSTEM') ON CONFLICT(room_id,request_key) DO NOTHING`, [deterministicUuid(`${roomId}:message:${index}:${eventId}:${venueId}`), roomId, message, requestKey]);
     } catch {
       throw new Error('Journey message schema is not provisioned.');
     }
@@ -71,7 +82,10 @@ export async function provisionTable(client: QueryClient, tableId: string, event
   await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'POST_CONTENT',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`content:${eventId}:${scheduleKey}:v1`, json({ eventId, tableId }), row.starts_at]);
   await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'CLOSE_ATTENDANCE',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`close-attendance:${scheduleKey}`, json({ tableId, eventId }), row.ends_at]);
   await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'FEEDBACK_FOLLOWUP',$2,$3) ON CONFLICT(job_key) DO NOTHING`, [`feedback-followup:${scheduleKey}`, json({ tableId }), new Date(feedbackAt.getTime() + 24 * 60 * 60 * 1000)]);
-  for (const member of members) await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by,action_url) VALUES($1,$2,$3,'IN_APP','SENT',$2,$4)`, [eventId, member.userId, '식탁이 확정되었어요. 채팅방에서 인사를 나눠 보세요.', `/tables/${tableId}`]);
+  for(const member of members){
+    const id=await queueBusinessEvent(client,{key:`confirmed:${scheduleKey}:${member.userId}`,kind:'CONFIRMED',userId:member.userId,eventId,url:`/tables/${tableId}`,variables:{schedule:time,venue:`${destination?.name??row.area} · ${destination?.address??''}`,reservation:reservationName},fallback:announcement});
+    await deliverBusinessEvent(client,id);
+  }
 }
 
 /** Rebuilds a cancelled table from its remaining members and other eligible applicants. */
@@ -86,6 +100,14 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     const actualEventId = table.rows[0].event_id;
     const activeCount=await client.query<any>("SELECT count(*) count FROM table_members WHERE table_id=$1 AND status='ACTIVE'",[tableId]);
     if(table.rows[0].status==='CONFIRMED'&&Number(activeCount.rows[0]?.count??0)>=4){if(own)await client.query('COMMIT');return {status:'REPAIRED',tableId};}
+    if(proposalOnly){
+    const {offerVacantSeats}=await import('./waitlist');
+    await offerVacantSeats(client);
+    if((await client.query("SELECT 1 FROM waitlist_offers WHERE table_id=$1 AND status='OFFERED' AND expires_at>now()",[tableId])).rowCount){if(own)await client.query('COMMIT');return {status:'WAITING',tableId};}
+    }
+    const {recoverUnderfilledTables}=await import('./table-recovery');
+    const recovered=await recoverUnderfilledTables(client,tableId);
+    if(recovered){if(own)await client.query('COMMIT');return recovered;}
     const activeMembers = await client.query<any>(`SELECT a.id application_id,a.user_id,a.status application_status FROM table_members tm JOIN applications a ON a.id=tm.application_id WHERE tm.table_id=$1 AND tm.status='ACTIVE'`,[tableId]);
     const existing = await client.query<any>(`SELECT a.id application_id,a.user_id,pr.birth_year,pr.gender,pr.mbti,pr.interests,pr.traits,pr.desired_traits
       FROM table_members tm JOIN applications a ON a.id=tm.application_id JOIN profiles pr ON pr.user_id=a.user_id
@@ -95,17 +117,18 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     const choices = await client.query<any>(`SELECT DISTINCT a.id application_id,a.user_id,pr.birth_year,pr.gender,pr.mbti,pr.interests,pr.traits,pr.desired_traits
       FROM applications a JOIN users u ON u.id=a.user_id JOIN payments p ON p.application_id=a.id JOIN profiles pr ON pr.user_id=a.user_id
       JOIN application_options o ON o.application_id=a.id JOIN events e ON e.id=o.event_id
-      WHERE a.status='SUBMITTED' AND a.matching_status IN ('WAITING','REALLOCATING') AND p.status='PAID'
+      WHERE a.status='SUBMITTED' AND a.matching_status IN ('WAITING','REALLOCATING','ALTERNATIVE_OFFERED') AND p.status='PAID'
         AND u.restricted_status='ACTIVE' AND pr.consent_privacy AND pr.consent_operations
         AND e.status IN ('OPEN','CLOSED') AND e.starts_at>now()
         AND NOT EXISTS (SELECT 1 FROM table_members tm WHERE tm.application_id=a.id AND tm.status='ACTIVE')`, [], `SELECT DISTINCT a.id application_id,a.user_id,pr.birth_year,pr.gender,pr.mbti,pr.interests,pr.traits,pr.desired_traits
       FROM applications a JOIN users u ON u.id=a.user_id JOIN payments p ON p.application_id=a.id JOIN profiles pr ON pr.user_id=a.user_id
       JOIN application_options o ON o.application_id=a.id JOIN events e ON e.id=o.event_id
-      WHERE a.status='SUBMITTED' AND a.matching_status IN ('WAITING','REALLOCATING') AND p.status='PAID'
+      WHERE a.status='SUBMITTED' AND a.matching_status IN ('WAITING','REALLOCATING','ALTERNATIVE_OFFERED') AND p.status='PAID'
         AND u.restricted_status='ACTIVE' AND pr.consent_privacy=1 AND pr.consent_operations=1
         AND e.status IN ('OPEN','CLOSED') AND e.starts_at>CURRENT_TIMESTAMP
         AND NOT EXISTS (SELECT 1 FROM table_members tm WHERE tm.application_id=a.id AND tm.status='ACTIVE')`);
-    const all = [...existing.rows, ...choices.rows];
+    const declined=(await client.query<any>("SELECT application_id FROM waitlist_offers WHERE table_id=$1 AND status IN ('OFFERED','DECLINED','EXPIRED')",[tableId])).rows;
+    const all = [...existing.rows, ...choices.rows.filter((r:any)=>!declined.some(d=>d.application_id===r.application_id))];
     const optionRows = await client.query<any>('SELECT application_id,event_id FROM application_options');
     const options = new Map<string,string[]>(); for (const row of optionRows.rows) options.set(row.application_id,[...(options.get(row.application_id)??[]),row.event_id]);
     const rel = await client.query<any>("SELECT source_user_id,target_user_id FROM match_relationships WHERE active AND relationship_type IN ('BLOCK','DISLIKE','REPORT')");
@@ -126,12 +149,12 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     let best: MatchCandidate[] | undefined; let selectedEventId=actualEventId; let repairPool:MatchCandidate[]=[];
     const possibleIds=Array.from(new Set([actualEventId,...existing.rows.flatMap((r:any)=>options.get(r.application_id)??[])]));
     const placeholders=possibleIds.map((_,i)=>`$${i+1}`).join(',')||'NULL';
-    const eventInfo=await client.query<any>(`SELECT id,status,application_deadline,capacity,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events WHERE id IN (${placeholders})`,possibleIds,`SELECT id,status,application_deadline,capacity,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events WHERE id IN (${placeholders})`);
+    const eventInfo=await client.query<any>(`SELECT id,area,status,application_deadline,capacity,starts_at,COALESCE(ends_at,starts_at+interval '2 hours') ends_at FROM events WHERE id IN (${placeholders})`,possibleIds,`SELECT id,area,status,application_deadline,capacity,starts_at,COALESCE(ends_at,datetime(starts_at,'+2 hours')) ends_at FROM events WHERE id IN (${placeholders})`);
     const eventRows = eventInfo.rows.filter((e: any) =>
       ['OPEN', 'CLOSED'].includes(e.status) &&
       new Date(e.starts_at).getTime() > Date.now(),
     );
-    for(const event of eventRows.sort((a:any,b:any)=>Number(b.id===actualEventId)-Number(a.id===actualEventId)||a.id.localeCompare(b.id))) {
+    for(const event of eventRows.sort((a:any,b:any)=>reallocationPriority(eventInfo.rows.find(e=>e.id===actualEventId),a)-reallocationPriority(eventInfo.rows.find(e=>e.id===actualEventId),b)||+new Date(a.starts_at)-+new Date(b.starts_at)||a.id.localeCompare(b.id))) {
       const eventPolicy = await effectivePolicy(client, event.id);
       const weights = eventPolicy.weights, minScore = eventPolicy.minScore;
       const pool=await enrichCandidates(client,candidates.filter(c=>c.eventIds.includes(event.id)&&!otherSeats.some(s=>s.user_id===c.userId&&repairTimes[s.event_id]&&new Date(event.starts_at).getTime()<new Date(repairTimes[s.event_id].endsAt).getTime()&&new Date(repairTimes[s.event_id].startsAt).getTime()<new Date(event.ends_at).getTime())),eventPolicy.learningEnabled); repairPool=pool;
@@ -192,7 +215,7 @@ export async function repairTable(tableId: string, eventId?: string, connection?
     return {status:'EXCEPTION',tableId};
   } catch(error){if(own) await client.query('ROLLBACK');throw error;} finally {if(own)client.release();}
 }
-/** Historical fixture generation only. Runtime matching always uses the reviewed path below. */
+/** Historical fixture generation only. Runtime matching always uses the automatic path below. */
 export async function seedConfirmedMatching(eventId: string, seed = 'core-v1', connection?: QueryClient): Promise<MatchingRun> {
   const client = connection ?? await db.connect();
   const own = !connection;
@@ -261,7 +284,7 @@ export async function seedConfirmedMatching(eventId: string, seed = 'core-v1', c
   } catch (error) { if (own) await client.query('ROLLBACK'); throw error; } finally { if (own) client.release(); }
 }
 
-export async function runMatching(eventId:string,seed='review-v1',connection?:QueryClient){return generateMatchingProposals(eventId,seed,connection);}
+export async function runMatching(eventId:string,seed='automatic-v2',connection?:QueryClient){return runAutomaticMatching(eventId,seed,connection);}
 
 export async function resolveApplication(userId: string, applicationId: string, choice: 'TRANSFER'|'HOLD'|'REFUND', version: number, eventId?: string) {
   const client = await db.connect();
@@ -279,6 +302,7 @@ export async function resolveApplication(userId: string, applicationId: string, 
       }
       throw new Error('해결 선택이 이미 처리되었거나 유효하지 않습니다.');
     }
+    if((await client.query("SELECT 1 FROM table_members WHERE application_id=$1 AND status='ACTIVE'",[applicationId])).rowCount)throw new Error('이미 확정된 식탁이 있습니다. 참가 취소 정책을 확인해 주세요.');
     if (['OFFERED','FAILED'].includes(row.status)) {
     const resolutionId = row.id;
     let resultPayload: Record<string, unknown> = { status: choice };
@@ -290,13 +314,17 @@ export async function resolveApplication(userId: string, applicationId: string, 
       }
       const offered = parse<Array<{ event_id?: string; eventId?: string }>>(row.alternatives, []);
       if (!offered.some((x) => (x.event_id ?? x.eventId) === eventId)) throw new Error('제공된 대안 일정만 선택할 수 있습니다.');
-      const target = await client.query('SELECT id FROM events WHERE id=$1 AND status=\'OPEN\' AND starts_at>now() AND application_deadline>now() AND NOT EXISTS (SELECT 1 FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE t.event_id=$1 AND tm.status=\'ACTIVE\')', [eventId]);
-      if (!target.rowCount) throw new Error('이동할 수 없는 일정입니다.');
+      const destination=await eligibleAlternative(client,applicationId,eventId);
+      if (!destination) throw new Error('이동할 수 없는 일정입니다.');
       await client.query('DELETE FROM application_options WHERE application_id=$1', [applicationId]);
       await client.query('INSERT INTO application_options(application_id,event_id) VALUES($1,$2)', [applicationId,eventId]);
+
+      const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(destination.starts_at));
+      await client.query("UPDATE availability_registrations SET dates=$2,areas=$3,status='ACTIVE' WHERE application_id=$1",[applicationId,json([day]),json([destination.area])]);
       await client.query(`UPDATE resolution_cases SET status='TRANSFERRED',version=version+1,selected_choice='TRANSFER',transferred_event_id=$2,result_payload=${pgJson('$3')},selected_at=now(),updated_at=now() WHERE id=$1`, [resolutionId,eventId,json({ status: choice, eventId })]);
       await client.query(`UPDATE applications SET matching_status='WAITING',status='SUBMITTED',updated_at=now() WHERE id=$1`, [applicationId]);
       await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',${pgJson('$2')},(SELECT application_deadline FROM events WHERE id=$3)) ON CONFLICT(job_key) DO NOTHING`, [`match-event:${eventId}`,json({ eventId }),eventId]);
+      await queueBusinessEvent(client,{key:`transfer:${resolutionId}:${version}`,kind:'TRANSFERRED',userId,applicationId,eventId,variables:{schedule:scheduleLabel([destination]),deadline:new Date(destination.application_deadline).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})}});
       resultPayload = { status: choice, eventId };
     } else if (choice === 'HOLD') {
       const restored = await client.query(`INSERT INTO entitlement_entries(entitlement_id,application_id,entry_type) SELECT own.entitlement_id,$1,'RESTORE' FROM entitlement_entries own WHERE own.application_id=$1 AND own.entry_type='USE' AND NOT EXISTS (SELECT 1 FROM entitlement_entries x WHERE x.entitlement_id=own.entitlement_id AND x.application_id=$1 AND x.entry_type='RESTORE') RETURNING entitlement_id`, [applicationId]);
@@ -314,6 +342,8 @@ export async function resolveApplication(userId: string, applicationId: string, 
       await client.query(`UPDATE resolution_cases SET status='REFUND_REQUESTED',version=version+1,selected_choice='REFUND',result_payload=${pgJson('$2')},selected_at=now(),updated_at=now() WHERE id=$1`, [resolutionId,json({ status: choice })]);
       await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'PROCESS_REFUND',${pgJson('$2')},now()) ON CONFLICT(job_key) DO NOTHING`, [`refund:${resolutionId}`,json({ resolutionId })]);
     }
+    if(choice!=='TRANSFER')await client.query("UPDATE availability_registrations SET status='CANCELLED' WHERE application_id=$1",[applicationId]);
+    await client.query("INSERT INTO notifications(recipient_user_id,message,sent_by,action_url) VALUES($1,$2,$1,$3)",[userId,choice==='TRANSFER'?'선택한 새 일정으로 이동했어요. 결제는 다시 진행하지 않아요.':choice==='HOLD'?'참가권을 보관했어요. 새로운 일정에서 다시 사용할 수 있어요.':'환불 요청을 접수했어요. 결제 내역에서 처리 결과를 확인해 주세요.',choice==='REFUND'?'/payments':'/applications']);
     await client.query('COMMIT'); return resultPayload;
     } else throw new Error('이미 처리된 해결 선택입니다.');
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }

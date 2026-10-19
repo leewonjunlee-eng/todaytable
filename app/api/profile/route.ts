@@ -3,6 +3,7 @@ import { apiUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import {profileInput} from '@/lib/profile-validation';
 import { sameOrigin } from '@/lib/http';
+import {PROFILE_TEST_VERSION,profileTestResult,validProfileTestAnswers} from '@/lib/profile-test';
 
 export const runtime = 'nodejs';
 export const dynamic='force-dynamic';
@@ -17,7 +18,9 @@ export async function GET(request: Request) {
     [user.id],
   );
   const profile=result.rows[0] as any;
-  return NextResponse.json(profile?{...profile,gender:profile.gender==='NON_BINARY'?'PREFER_NOT_TO_SAY':profile.gender}:null);
+  if(!profile)return NextResponse.json(null);
+  const test=(await db.query('SELECT test_version,answers,result_title,updated_at FROM profile_tests WHERE user_id=$1',[user.id])).rows[0];
+  return NextResponse.json({...profile,gender:profile.gender==='NON_BINARY'?'PREFER_NOT_TO_SAY':profile.gender,profile_test:test?{...test,answers:typeof test.answers==='string'?JSON.parse(test.answers):test.answers}:null});
 }
 
 export async function PUT(request: Request) {
@@ -27,11 +30,16 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: '요청 출처를 확인할 수 없습니다.' }, { status: 403 });
   }
 
+  const client=await db.connect();
   try {
-    const {value:body,fields}=profileInput(await request.json());
+    const parsed=await request.json();
+    const raw=parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{};
+    const {value:body,fields}=profileInput(raw);
+    if(raw.testAnswers!==undefined&&!validProfileTestAnswers(raw.testAnswers))fields.testAnswers='각 질문의 답변을 선택해 주세요.';
     if(Object.keys(fields).length)return NextResponse.json({error:Object.values(fields)[0],fields},{status:400});
 
-    await db.query(
+    await client.query('BEGIN');
+    await client.query(
       `INSERT INTO profiles(
          user_id,display_name,contact_phone,birth_year,gender,occupation,mbti,
          interests,traits,desired_traits,food_budgets,dietary_notes,
@@ -60,13 +68,19 @@ export async function PUT(request: Request) {
          dietary_notes=excluded.dietary_notes,consent_privacy=1,consent_operations=1,
          consent_version='v1',consented_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP`,
     );
-    await db.query(
+    if(raw.testAnswers!==undefined){
+      const result=profileTestResult(raw.testAnswers);
+      await client.query(`INSERT INTO profile_tests(user_id,test_version,answers,result_title) VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET test_version=excluded.test_version,answers=excluded.answers,result_title=excluded.result_title,updated_at=now()`,[user.id,PROFILE_TEST_VERSION,JSON.stringify(raw.testAnswers),result.title],`INSERT INTO profile_tests(user_id,test_version,answers,result_title) VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET test_version=excluded.test_version,answers=excluded.answers,result_title=excluded.result_title,updated_at=CURRENT_TIMESTAMP`);
+    }
+    await client.query(
       `INSERT INTO audit_logs(actor_user_id,action,entity_type,entity_id)
        VALUES($1,'PROFILE_UPDATED','profile',$2)`,
       [user.id, user.id],
     );
+    await client.query('COMMIT');
     return NextResponse.json({ ok: true });
   } catch {
+    await client.query('ROLLBACK').catch(()=>{});
     return NextResponse.json({ error: '프로필을 저장하지 못했습니다.' }, { status: 500 });
-  }
+  } finally {client.release();}
 }

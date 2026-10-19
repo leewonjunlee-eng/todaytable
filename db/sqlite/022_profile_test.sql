@@ -1,0 +1,7 @@
+CREATE TABLE profile_tests (
+ user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+ test_version TEXT NOT NULL,
+ answers TEXT NOT NULL,
+ result_title TEXT NOT NULL,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

@@ -2,7 +2,7 @@
 
 ## Railway Deployment
 
-This project is configured for deployment to Railway using Docker. See [current status](docs/STATUS.md) for verification failures and active deployment IDs before deploying local changes.
+This project is configured for deployment to Railway using Docker. See [current status](docs/STATUS.md) for current verification evidence and active deployment IDs before deploying local changes.
 
 ### Prerequisites
 - Railway account
@@ -50,7 +50,7 @@ WORKER_ID=railway-worker-1
 4. Link services together in Railway dashboard
 5. Set environment variables on both web and worker services. Leave the worker HTTP health check unset; see [worker deployment](WORKER_DEPLOYMENT.md).
 6. Back up the target database and apply migrations with `node --import tsx scripts/migrate.ts` before starting compatible web and worker versions.
-7. Enable automatic deploys from GitHub only after the current verification failures are resolved.
+7. Deploy the verified source to the worker first, then the web service. For GitHub auto-deploys, first ensure the branch contains every verified local source file; a direct upload does not update GitHub.
 
 ### Local Development with Docker
 ```bash
@@ -79,3 +79,13 @@ The PostgreSQL migrations are additive through 019. The original public/provided
 For a service rollback, use the Railway deployment history to select the prior verified web and worker images as a compatible pair. The API's `canRollback`/`canRedeploy` flags were checked; production services were not rolled back as part of verification. Keep the additive schema and existing data in place. Returning to a pre-extension worker also requires retiring pending `UPDATE_PREFERENCE_SIGNALS` jobs before that old worker starts, because it lacks that handler. Do not drop the new tables or overwrite the production database to roll back application code. Recheck the chosen image's schema expectations and preserve a fresh backup before a recovery action.
 
 Matching policy rollback is independent: compare again and reapply the prior immutable policy. This was executed on a demo event and restored `core-v1` without changing any confirmed table. The production default retains the original matching weights.
+
+## Verified release 2026-10-19
+
+Migrations 021–028 are applied to the existing production PostgreSQL. Current successful web/worker IDs, test results and limitations are in [STATUS](docs/STATUS.md) and [release notes](docs/RELEASE_20261019.md). The initial release was uploaded from allowlisted source directories. The verified application, migrations, tests and current documentation are also included in the master branch. Do not deploy an older branch over this release without reconciling its files.
+
+Before migration, all 66 existing public/provided_data tables were backed up privately. The snapshot was restored into a dedicated local test database, 021–028 were applied, and every original row was compared on its original columns. Production preservation and runtime source hashes were checked after deployment. Evidence is under `.data/completion-*`; do not upload this directory.
+
+Keep the web `/` health check in the web configuration. The worker release uses `railway.worker.json` as its `railway.json`, with its worker start command and no HTTP health check. Both images contain the same runtime source.
+
+The immediate previous web/worker IDs are recorded in STATUS. An old worker does not support `DELIVER_BUSINESS_EVENT` or the new recovery behavior. For recovery, prefer a verified compatible pair; if returning to an older worker is unavoidable, explicitly stop new writers and account for pending/running jobs of unsupported kinds before it resumes. Keep additive schema and transaction history intact. Do not delete pending jobs or restore an old database snapshot as a routine application rollback.

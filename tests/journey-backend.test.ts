@@ -46,7 +46,7 @@ test('real SQLite worker slice provisions reservation, room, topics, attendance 
   await db.query(`UPDATE scheduled_jobs SET run_at=CURRENT_TIMESTAMP,next_attempt_at=CURRENT_TIMESTAMP WHERE job_type='JOURNEY_REMINDER'`);
   const { tick } = await import('../worker/index');
   await tick('journey-test');
-  await tick('journey-test');
+  for(let i=0;i<40;i++){const job=await claimJob('journey-test');if(!job)break;await processJob(job,'journey-test');}
   assert.equal((await db.query(`SELECT count(*) count FROM notifications WHERE channel='IN_APP'`)).rows[0].count >= 5, true);
   const replay = await runMatching(event, 'journey-real');
   assert.equal(replay.runId, result.runId);

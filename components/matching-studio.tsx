@@ -21,7 +21,7 @@ export function MatchingStudio(){
     setPreview(result);setChoice(result.baselinePolicy);
    }else{
     await q.refresh();
-    setMessage(data.action==='APPLY'?'이 회차의 기조를 저장했어요. 검토할 식탁으로 추천됩니다. 최종 승인 후 멤버에게 안내합니다.':data.action==='DEFAULT'?'다음 회차에 사용할 기본 기조를 변경했어요.':'새 정책 버전을 만들었어요.');
+    setMessage(data.action==='APPLY'?'이 회차의 기조를 저장했어요. 마감 시 조건에 맞는 식탁을 자동 확정하고 안내합니다.':data.action==='DEFAULT'?'다음 회차에 사용할 기본 기조를 변경했어요.':'새 정책 버전을 만들었어요.');
     if(data.action==='CUSTOM_POLICY')setPreview(null);
    }
    return result;
@@ -42,7 +42,7 @@ export function MatchingStudio(){
  return (
   <JourneyLayout title="어떤 만남을 준비할까요?" eyebrow="ADMIN MATCHING" description="변하지 않는 안전 기준 위에, 이번 식탁의 작은 방향을 더합니다.">
    <JourneyState {...q} onRefresh={q.refresh}>
-    <div className="button-row"><Link className="button primary" href="/admin/matching/review">추천된 식탁 검토·승인 →</Link></div>
+    <div className="button-row"><Link className="button primary" href="/admin/matching/review">마감 후 매칭 결과 보기 →</Link></div>
     <div className="studio-principles"><span>4~6명</span><span>연령 폭 8년 이내</span><span>동의한 일정·지역</span><span>차단·신고 제외</span><p>모든 기조가 함께 지키는 기준입니다.</p></div>
     <section className="studio-policy-grid">{policies.map((p:any)=><article key={p.id} className={`policy-card ${q.data?.defaults?.policy_id===p.id?'default-policy':''}`}><div className="policy-icon">{p.id.startsWith('affinity')?'❋':p.id.startsWith('discovery')?'✧':p.id.startsWith('conversation')?'❧':'◌'}</div><div className="section-title"><h2>{p.name}</h2>{q.data?.defaults?.policy_id===p.id&&<span className="tag">기본 기조</span>}</div><p>{p.description}</p><div className="weight-bars">{Object.entries(p.weights).map(([k,v])=><div key={k}><span>{axes[k]}</span><i><b style={{width:`${Number(v)*100}%`}}/></i><small>{Math.round(Number(v)*100)}%</small></div>)}</div><small className="policy-version">{p.id} · 후기 반영 {p.learningEnabled?'사용':'해제'}</small>{owner&&q.data?.defaults?.policy_id!==p.id&&<button className="button quiet" disabled={busy} onClick={()=>void act({action:'DEFAULT',policyId:p.id,version:q.data.defaults.version})}>기본 기조로 사용</button>}</article>)}</section>
     <section className="panel studio-preview">
@@ -67,9 +67,7 @@ export function MatchingStudio(){
            ):(
             <>
              이 회차의 대기 인원으로는 최소 식탁(4명)을 만들 수 없습니다.
-             <label className="check-label">
-              <input type="checkbox" onChange={e=>act({action:'PREVIEW',eventId,forcePreview:e.target.checked})}/>최소 인원 무시하고 테스트 프리뷰 보기
-             </label>
+
             </>
            )}
           </div>
@@ -78,7 +76,7 @@ export function MatchingStudio(){
        )}
       </>
      )}
-     <div className="studio-apply"><div><strong>{policies.find((p:any)=>p.id===choice)?.name}</strong><p>{Number(event?.table_count)>0?'이미 확정된 식탁은 기조 변경으로 바뀌지 않습니다.':'이 회차에 적용하면 새로운 기준으로 추천합니다. 최종 확정은 검토 화면에서 승인해 주세요.'}</p></div><button className="button primary" disabled={busy||!choice||Number(event?.table_count)>0} onClick={()=>void act({action:'APPLY',previewId:preview.id,policyId:choice})}>이 회차에 적용</button></div>
+     <div className="studio-apply"><div><strong>{policies.find((p:any)=>p.id===choice)?.name}</strong><p>{Number(event?.table_count)>0?'이미 확정된 식탁은 기조 변경으로 바뀌지 않습니다.':'이 회차에 적용하면 마감 시 새로운 기준으로 자동 매칭·확정합니다.'}</p></div><button className="button primary" disabled={busy||!choice||Number(event?.table_count)>0} onClick={()=>void act({action:'APPLY',previewId:preview.id,policyId:choice})}>이 회차에 적용</button></div>
      <FormNotice message={message}/>
     </section>
     <details className="panel advanced-policy"><summary>직접 조정하기 · 어떤 기준을 얼마나 반영할까요?</summary><p className="muted">정책은 덮어쓰지 않고 새 버전으로 남깁니다. 이전 정책을 다시 선택해 되돌릴 수 있어요. MBTI는 검증된 궁합 지표가 아닌 참고 규칙입니다.</p>

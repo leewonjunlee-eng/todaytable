@@ -62,3 +62,13 @@ test('large cohorts compare bounded candidates reproducibly without losing eligi
  for(const group of first.groups){assert.ok(group.members.length>=4&&group.members.length<=6);assert.ok(Math.max(...group.members.map(m=>m.birthYear))-Math.min(...group.members.map(m=>m.birthYear))<=8);}
  t.diagnostic(`24 participants, two deterministic runs: ${Math.round(performance.now()-start)}ms`);
 });
+
+test('profile test trait labels satisfy the intended desired-person labels in real scoring',()=>{
+ const weights={gender:0,mbti:0,interests:0,traits:1,novelty:0};
+ const owner={...candidate('trait-owner'),traits:['깊은 대화를 좋아함'],desiredTraits:['깊은 대화가 되는 사람']};
+ const deep={...candidate('trait-deep'),traits:['깊은 대화를 좋아함']};
+ const light={...candidate('trait-light'),traits:['가볍고 유머 있는 대화를 좋아함']};
+ assert.ok(groupScore([owner,deep],weights)>groupScore([owner,light],weights));
+ assert.ok(groupScore([{...owner,desiredTraits:['나와 비슷한 사람']},deep],weights)>groupScore([{...owner,desiredTraits:['나와 비슷한 사람']},light],weights));
+ assert.ok(groupScore([{...owner,desiredTraits:['나와 다른 자극을 주는 사람']},light],weights)>groupScore([{...owner,desiredTraits:['나와 다른 자극을 주는 사람']},deep],weights));
+});

@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { apiUser } from '@/lib/auth';
+import {requestOperator} from '@/lib/operators';
 import { db } from '@/lib/db';
 
 export async function GET(request: Request) {
-  const user = await apiUser(request, true);
+  const user = await requestOperator(request);
   if (!user) return NextResponse.json({ error: '운영자 권한이 필요합니다.' }, { status: 403 });
 
   const [applications, payments, jobs, events, venues] = await Promise.all([

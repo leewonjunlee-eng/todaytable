@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 
 export function LoginForm() {
   const [error, setError] = useState('');
@@ -21,7 +22,7 @@ export function LoginForm() {
         setError(result.error ?? '로그인할 수 없습니다.');
         return;
       }
-      location.href = '/';
+      location.href = result.next ?? '/';
     } catch {
       setError('서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {
@@ -35,6 +36,7 @@ export function LoginForm() {
       <label>비밀번호<input name="password" type="password" autoComplete="current-password" required /></label>
       {error && <p className="form-error">{error}</p>}
       <button className="button primary full" disabled={busy}>{busy ? '확인 중…' : '로그인'} <span>→</span></button>
+      <p>처음 오셨나요? <Link href="/signup">회원가입하고 취향 알아보기</Link></p>
     </form>
   );
 }

@@ -74,7 +74,7 @@ export function VenueForm() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: values.get('name'), address: values.get('address'), area: values.get('area'),
-          capacity: Number(values.get('capacity')),
+          capacity: Number(values.get('capacity')),cuisine:values.get('cuisine'),priceMin:Number(values.get('priceMin')),priceMax:Number(values.get('priceMax')),contactPhone:values.get('contactPhone'),description:values.get('description'),
         }),
       });
       const result = await response.json();
@@ -90,7 +90,7 @@ export function VenueForm() {
   return (
     <form className="form-stack" onSubmit={submit}>
       <label>식당 이름<input name="name" required maxLength={120} /></label>
-      <label>주소<input name="address" required maxLength={240} /></label>
+      <label>주소<input name="address" required maxLength={240} /></label><label>음식 종류<select name="cuisine">{['한식','이탈리안','일식','중식','베트남식','채식','다이닝'].map(c=><option key={c}>{c}</option>)}</select></label><div className="form-grid"><label>1인 식사 가격 최소<input name="priceMin" type="number" min="0" max="1000000" defaultValue="20000" required/></label><label>1인 식사 가격 최대<input name="priceMax" type="number" min="0" max="1000000" defaultValue="30000" required/></label></div><label>식당 연락처<input name="contactPhone" type="tel" maxLength={40}/></label><label>공간·음식 안내<textarea name="description" rows={3} maxLength={1000}/></label>
       <div className="form-grid">
         <label>지역<select name="area">{areas.map((area) => <option key={area}>{area}</option>)}</select></label>
         <label>수용 인원<input name="capacity" type="number" min="4" max="300" defaultValue="24" required /></label>

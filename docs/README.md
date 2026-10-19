@@ -5,6 +5,8 @@
 | 목적 | 문서 |
 | --- | --- |
 | 현재 구현·검증·배포 상태와 다음 작업 | [현재 현황](STATUS.md) |
+| 021~028 보완·검증·배포 근거 | [2026-10-19 릴리스](RELEASE_20261019.md) |
+| 원본 PRD 대비 부족한 점·재현 결과·구현 순서 | [2026-10-19 PRD 분석 및 구현 계획](PRD_GAP_ANALYSIS_AND_PLAN_20261019.md) |
 | 설치·실행·환경변수 | [프로젝트 README](../README.md) |
 | 제품 확장 요구사항 | [제품 확장 계획](PRODUCT_EVOLUTION_PLAN.md) |
 | 기존 구현 구조와 상세 인수인계 | [10월 17일 인수인계](IMPLEMENTATION_HANDOFF.md) |

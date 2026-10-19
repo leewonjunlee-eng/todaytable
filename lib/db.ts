@@ -75,7 +75,7 @@ function parseJsonColumns(row: Record<string, unknown>) {
   for (const key of ['consent_privacy', 'consent_operations', 'active', 'composing', 'helpful', 'is_demo', 'learning_enabled', 'preference_confirmed', 'confirmed']) {
     if (row[key] === 0 || row[key] === 1) row[key] = row[key] === 1;
   }
-  for (const key of ['created_at', 'updated_at', 'read_at', 'last_public_at', 'first_response_at', 'resolved_at', 'next_followup_at', 'ends_at', 'expires_at', 'run_at', 'next_attempt_at', 'lease_until', 'completed_at', 'consented_at', 'starts_at', 'application_deadline']) {
+  for (const key of ['created_at', 'updated_at', 'read_at', 'last_public_at', 'first_response_at', 'resolved_at', 'next_followup_at', 'ends_at', 'expires_at', 'run_at', 'next_attempt_at', 'lease_until', 'completed_at', 'consented_at', 'starts_at', 'started_at', 'ended_at', 'work_started_at', 'application_deadline']) {
     const value = row[key];
     if (typeof value === 'string') {
       try {
@@ -197,7 +197,7 @@ export const db = {
           inTransaction = false;
           return { rows: [], rowCount: 0 } as QueryResult<Row>;
         }
-        if (/^\s*ROLLBACK\b/i.test(sql)) {
+        if (/^\s*ROLLBACK\b(?!\s+TO\b)/i.test(sql)) {
           if (inTransaction) connection.exec('ROLLBACK');
           inTransaction = false;
           return { rows: [], rowCount: 0 } as QueryResult<Row>;

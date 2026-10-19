@@ -1,0 +1,9 @@
+'use client';
+import {useState} from 'react';
+import {FormNotice,journeyFetch,useJourney} from './journey-ui';
+export function WaitlistOffers({onAccepted}:{onAccepted?:()=>Promise<void>}){
+ const q=useJourney('/api/waitlist',10000),[busy,setBusy]=useState(''),[notice,setNotice]=useState('');
+ async function respond(id:string,accept:boolean){if(busy)return;setBusy(id);setNotice('');try{const result=await journeyFetch('/api/waitlist',{method:'POST',body:JSON.stringify({id,accept})});setNotice(result.status==='UNAVAILABLE'?'자리가 이미 마감됐어요. 기존 신청은 그대로 유지돼요.':accept?'식탁 참여가 확정됐어요. 시간과 장소를 확인해 주세요.':'이번 제안을 넘겼어요. 기존 신청은 그대로 유지돼요.');await q.refresh();if(accept)await onAccepted?.();}catch(e){setNotice(e instanceof Error?e.message:'제안을 처리하지 못했어요.');await q.refresh();}finally{setBusy('');}}
+ if(!q.data?.offers?.length&&!notice)return null;
+ return <section className="home-section" aria-label="참여 가능한 식탁 제안"><h2>함께할 수 있는 자리가 생겼어요</h2><p>새로운 일정·지역의 식탁은 동의한 뒤에만 참여가 확정돼요.</p>{q.data?.offers?.map((offer:any)=><article className="panel" key={offer.id}><span className="tag">대기자 자리 제안</span><h3>{offer.title}</h3><p>{new Date(offer.starts_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'})} · {offer.area}</p><p>{offer.venue_name}</p><p className="muted">응답 기한 {new Date(offer.expires_at).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</p><div className="button-row"><button className="button primary" disabled={!!busy} onClick={()=>void respond(offer.id,true)}>{busy===offer.id?'처리 중…':'이 식탁에 참여하기'}</button><button className="button quiet" disabled={!!busy} onClick={()=>void respond(offer.id,false)}>이번에는 넘길게요</button></div></article>)}<FormNotice message={notice}/></section>;
+}

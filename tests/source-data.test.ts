@@ -26,6 +26,7 @@ before(async () => {
   }
   ({ listSourceResponses, convertSourceResponse, removeSourceConversion } = await import('../lib/source-data'));
   const admin = await db.query<{id:string}>("INSERT INTO users(email,password_hash,role) VALUES($1,'placeholder','ADMIN') RETURNING id", [`admin-${randomUUID()}@test.invalid`]);
+  await db.query("INSERT INTO operator_profiles(user_id,display_name,team_role) VALUES($1,'원본 자료 운영자','OWNER')",[admin.rows[0].id]);
   adminId = admin.rows[0].id;
   const preparedPath=join(dir,'provided-data.json');
   execFileSync('python3',['scripts/prepare_source_data.py','--output',preparedPath],{cwd:process.cwd(),stdio:'ignore'});

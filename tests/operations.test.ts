@@ -13,6 +13,7 @@ test('operations demo is transactional, repeat-safe, and feeds actual participan
   try {
     for (const name of (await readdir('db/sqlite')).filter(n=>n.endsWith('.sql')).sort()) await db.execScript(await readFile(join('db/sqlite',name),'utf8'));
     const admin=(await db.query<any>("INSERT INTO users(email,password_hash,role) VALUES('admin@test.invalid','x','ADMIN') RETURNING id")).rows[0].id;
+    await db.query("INSERT INTO operator_profiles(user_id,display_name,team_role) VALUES($1,'운영자','OWNER')",[admin]);
     const viewer=(await db.query<any>("INSERT INTO users(email,password_hash) VALUES('user@todaytable.local','unchanged') RETURNING id")).rows[0].id;
     const {seedOperations}=await import('../scripts/seed-operations');
     const seeded=await seedOperations(); assert.equal(seeded.created,true); assert.equal(seeded.applications,60); assert.equal(seeded.tables,6);

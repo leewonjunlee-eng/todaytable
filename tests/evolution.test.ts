@@ -86,7 +86,7 @@ test('three-operator support preserves ownership, private notes, ordering, versi
    for(const cohort of [people.slice(0,4),people.slice(4,8)])for(const a of cohort)for(const b of cohort)if(a!==b)await db.query('INSERT INTO match_history(id,table_id,user_id,other_user_id) VALUES($1,$2,$3,$4)',[randomUUID(),oldTable,a,b]);
    const before=(await db.query<any>('SELECT (SELECT count(*) FROM dining_tables) tables,(SELECT count(*) FROM scheduled_jobs) jobs,(SELECT count(*) FROM notifications) notifications')).rows[0];
    const firstResponse=await studio.POST(request({action:'PREVIEW',eventId:event}));assert.equal(firstResponse.status,200,JSON.stringify(await firstResponse.clone().json()));const first=await firstResponse.json();
-   assert.equal(first.results.length,4);assert.ok(first.results.every((r:any)=>r.matchedCount===8));
+   assert.deepEqual(first.results.map((r:any)=>r.policyId).sort(),['prd-v2','balanced-v1','affinity-v1','discovery-v1','conversation-v1'].sort());assert.ok(first.results.every((r:any)=>r.matchedCount===8));
    const stable=await(await studio.POST(request({action:'PREVIEW',eventId:event}))).json();assert.equal(stable.snapshotHash,first.snapshotHash);assert.deepEqual(stable.results,first.results);
    assert.deepEqual((await db.query<any>('SELECT (SELECT count(*) FROM dining_tables) tables,(SELECT count(*) FROM scheduled_jobs) jobs,(SELECT count(*) FROM notifications) notifications')).rows[0],before);
    const affinity=first.results.find((r:any)=>r.policyId==='affinity-v1'),discovery=first.results.find((r:any)=>r.policyId==='discovery-v1');assert.notDeepEqual(affinity.groups.map((g:any)=>g.members.map((m:any)=>m.userId).sort()).sort(),discovery.groups.map((g:any)=>g.members.map((m:any)=>m.userId).sort()).sort());

@@ -1,3 +1,4 @@
+export const MATCH_ENGINE_VERSION='connected-events-v4';
 export type MatchCandidate = {
   applicationId: string; userId: string; birthYear: number; gender: string; mbti: string;
   interests: string[]; traits: string[]; desiredTraits: string[]; eventIds: string[]; paid: boolean; valid: boolean;
@@ -33,9 +34,24 @@ function genderPair(a: MatchCandidate, b: MatchCandidate) {
   if (unknown(a.gender) || unknown(b.gender)) return 0.5;
   return a.gender === b.gender ? 0.25 : 1;
 }
+/** Profile answers and desired-person labels intentionally use different wording. */
+function desiredTraitEvidence(person:MatchCandidate,peer:MatchCandidate){
+ const mapping:Record<string,string>={'깊은 대화가 되는 사람':'깊은 대화를 좋아함','편하고 유머 있는 사람':'가볍고 유머 있는 대화를 좋아함','열정 있는 사람':'활기차고 에너지 있는 편','잔잔하고 안정적인 사람':'잔잔하고 조용한 편'};
+ return person.desiredTraits.reduce((score,wanted)=>{
+  if(wanted==='나와 비슷한 사람'||wanted==='나와 다른 자극을 주는 사람'){
+   if(!person.traits.length||!peer.traits.length)return score+.5;
+   const shared=overlap(person.traits,peer.traits),similarity=shared/Math.max(person.traits.length,peer.traits.length);
+   return score+(wanted==='나와 비슷한 사람'?similarity:1-similarity);
+  }
+  return score+(peer.traits.includes(mapping[wanted]??wanted)?1:0);
+ },0);
+}
+export function pairFeatures(a:MatchCandidate,b:MatchCandidate):MatchWeights{
+ return {gender:genderPair(a,b),mbti:mbtiHeuristic(a.mbti,b.mbti),interests:overlap(a.interests,b.interests)/Math.max(1,a.interests.length,b.interests.length),traits:(desiredTraitEvidence(a,b)+desiredTraitEvidence(b,a))/Math.max(1,a.desiredTraits.length+b.desiredTraits.length),novelty:(a.priorUserIds??[]).includes(b.userId)||(b.priorUserIds??[]).includes(a.userId)?0:1};
+}
 function pairScore(a: MatchCandidate, b: MatchCandidate, weights = DEFAULT_WEIGHTS) {
   const interest = overlap(a.interests, b.interests) / Math.max(1, Math.max(a.interests.length, b.interests.length));
-  const trait = (overlap(a.desiredTraits, b.traits) + overlap(b.desiredTraits, a.traits)) / Math.max(1, a.desiredTraits.length + b.desiredTraits.length);
+  const trait = (desiredTraitEvidence(a,b)+desiredTraitEvidence(b,a)) / Math.max(1,a.desiredTraits.length+b.desiredTraits.length);
   const novelty = (a.priorUserIds ?? []).includes(b.userId) || (b.priorUserIds ?? []).includes(a.userId) ? 0 : 1;
   const atmosphere=a.atmosphere&&b.atmosphere&&a.atmosphere!=='BALANCED'&&b.atmosphere!=='BALANCED'?(a.atmosphere===b.atmosphere?1:.25):.5;
   const base=genderPair(a,b)*weights.gender+mbtiHeuristic(a.mbti,b.mbti)*weights.mbti+interest*weights.interests+trait*weights.traits+novelty*weights.novelty;

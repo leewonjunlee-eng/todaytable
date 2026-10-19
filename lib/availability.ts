@@ -1,3 +1,4 @@
+import {checkoutGate} from './checkout';
 import {randomUUID} from 'node:crypto';
 import {db,databaseProvider} from './db';
 import {REGIONS,isCanonicalUuid} from './domain';
@@ -11,8 +12,7 @@ export function availabilityDays(now=new Date()){
 }
 export function validateAvailability(body:any){
  if(!body||typeof body!=='object'||Array.isArray(body))problem('가능한 날과 지역을 확인해 주세요.');
- const available=new Set(availabilityDays());
- if(!Array.isArray(body.dates)||body.dates.length<1||body.dates.length>8||body.dates.some((d:unknown)=>typeof d!=='string'||!available.has(d))||new Set(body.dates).size!==body.dates.length)problem('내일부터 60일 이내의 가능한 날을 1~8개 선택해 주세요.');
+ if(!Array.isArray(body.dates)||body.dates.length<1||body.dates.length>8||body.dates.some((d:unknown)=>typeof d!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(d)||!Number.isFinite(+new Date(`${d}T00:00:00Z`))||new Date(`${d}T00:00:00Z`).toISOString().slice(0,10)!==d)||new Set(body.dates).size!==body.dates.length)problem('모집 중인 날짜를 1~8개 선택해 주세요.');
  if(!Array.isArray(body.areas)||body.areas.length<1||body.areas.some((a:any)=>!REGIONS.includes(a))||new Set(body.areas).size!==body.areas.length)problem('가능한 지역을 선택해 주세요.');
  if(!isCanonicalUuid(body.requestKey))problem('요청 키를 확인해 주세요.');
  return {dates:[...body.dates].sort() as string[],areas:[...body.areas].sort() as string[]};
@@ -28,28 +28,29 @@ export async function registerAvailability(userId:string,body:any){
    if(previous.user_id!==userId||JSON.stringify(parseJson(previous.dates,[]))!==JSON.stringify(selected.dates)||JSON.stringify(parseJson(previous.areas,[]))!==JSON.stringify(selected.areas)||app?.pass_choice!==body.pass)problem('이미 다른 내용으로 저장된 요청입니다.',409);
    await c.query('COMMIT');return {id:previous.id,created:false};
   }
-  const operator=(await c.query<any>('SELECT user_id FROM operator_profiles WHERE active=true ORDER BY created_at,user_id LIMIT 1')).rows[0];
-  if(!operator)problem('현재 가능한 날을 등록할 수 없어요. 문의함으로 알려주세요.',503);
-  const eventIds:string[]=[];
-  for(const day of selected.dates)for(const area of selected.areas){
-   let slot=(await c.query<any>('SELECT event_id FROM availability_slots WHERE day=$1 AND area=$2',[day,area])).rows[0];
-   if(!slot){
-    const start=new Date(`${day}T19:30:00+09:00`),deadline=new Date(start.getTime()-7200000),end=new Date(start.getTime()+7200000),eventId=randomUUID();
-    await c.query("INSERT INTO events(id,title,starts_at,ends_at,application_deadline,area,capacity,price_cents,status,created_by) VALUES($1,$2,$3,$4,$5,$6,120,8000,'OPEN',$7)",[eventId,`${area}의 저녁`,start,end,deadline,area,operator.user_id]);
-    await c.query('INSERT INTO availability_slots(id,day,area,event_id) VALUES($1,$2,$3,$4)',[`${day}:${area}`,day,area,eventId]);slot={event_id:eventId};
-   }
-   eventIds.push(slot.event_id);
-  }
+  if(body.checkoutId)await checkoutGate(c,userId,body.checkoutId,{...selected,pass:body.pass});
+  const open=await recruitingEvents(c);
+  const matching=open.filter(e=>selected.dates.includes(e.day)&&selected.areas.includes(e.area));
+  if(selected.dates.some(day=>!matching.some(e=>e.day===day))||selected.areas.some(area=>!matching.some(e=>e.area===area)))problem('선택한 날짜와 지역에 모집 중인 회차가 없어요. 일정을 다시 확인해 주세요.',409);
+  const eventIds=matching.map(e=>e.id);
+  if(eventIds.length>32)problem('선택한 회차가 너무 많아요. 날짜나 지역을 줄여 주세요.');
   let application;
-  try{application=await submitApplication(userId,{eventIds,pass:body.pass,requestKey:body.requestKey},c);}catch(e){problem(e instanceof Error?e.message:'가능한 날을 저장하지 못했어요.');}
+  try{application=await submitApplication(userId,{eventIds,pass:body.pass,requestKey:body.requestKey,checkoutOutcome:body.checkoutOutcome},c);}catch(e){problem(e instanceof Error?e.message:'가능한 날을 저장하지 못했어요.');}
+  if(body.checkoutId)await c.query('UPDATE checkout_sessions SET status=$2,application_id=$3,updated_at=now() WHERE id=$1',[body.checkoutId,application.id?'COMPLETED':application.payment,application.id||null]);
+  if(!application.id){await c.query('COMMIT');return {id:'',payment:application.payment,created:application.created};}
   const id=randomUUID();
   await c.query('INSERT INTO availability_registrations(id,user_id,application_id,dates,areas,request_key) VALUES($1,$2,$3,$4,$5,$6)',[id,userId,application.id,JSON.stringify(selected.dates),JSON.stringify(selected.areas),body.requestKey]);
   // Each registration retries matching immediately; an old completed event job cannot hide later arrivals.
-  for(const eventId of eventIds)await c.query("INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',$2,now()) ON CONFLICT(job_key) DO NOTHING",[`availability-match:${id}:${eventId}`,JSON.stringify({eventId})]);
-  await c.query('COMMIT');return {id,created:true};
+  for(const event of matching)await c.query("INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',$2,$3) ON CONFLICT(job_key) DO NOTHING",[`availability-match:${id}:${event.id}`,JSON.stringify({eventId:event.id}),event.application_deadline]);
+  await c.query('COMMIT');return {id,applicationId:application.id,payment:application.payment,created:true};
  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 }
 export async function participantAvailability(userId:string){
  const rows=(await db.query<any>(`SELECT r.id,r.application_id,r.dates,r.areas,r.created_at,a.matching_status,a.status FROM availability_registrations r JOIN applications a ON a.id=r.application_id WHERE r.user_id=$1 AND r.status='ACTIVE' AND a.status='SUBMITTED' AND a.matching_status<>'CONFIRMED' ORDER BY r.created_at DESC`,[userId])).rows;
  return rows.map(r=>({...r,dates:parseJson<string[]>(r.dates,[]),areas:parseJson<string[]>(r.areas,[])})).filter(r=>r.dates.some((d:string)=>new Date(`${d}T21:30:00+09:00`).getTime()>Date.now()));
+}
+
+export async function recruitingEvents(client:Pick<import('./db').QueryClient,'query'>=db){
+ const rows=(await client.query<any>("SELECT id,title,area,starts_at,ends_at,application_deadline,capacity FROM events WHERE status='OPEN' AND application_deadline>now() AND starts_at>now() ORDER BY starts_at,id")).rows;
+ return rows.map(e=>({...e,day:new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(e.starts_at))}));
 }

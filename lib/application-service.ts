@@ -1,7 +1,9 @@
+import {queueBusinessEvent,scheduleLabel} from './business-events';
+import { randomUUID } from 'node:crypto';
 import { databaseProvider, db, type QueryClient } from './db';
 import { isCanonicalUuid, validateApplicationSelection } from './domain';
 
-type Submission = { eventIds: unknown; pass: unknown; requestKey: unknown };
+type Submission = { eventIds: unknown; pass: unknown; requestKey: unknown; checkoutOutcome?: unknown };
 
 function twoMonthExpiry(from: Date) {
   const monthStart = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 2, 1));
@@ -40,6 +42,7 @@ export async function submitApplication(userId: string, body: Submission, connec
       [userId, body.requestKey],
     );
     if (replay.rowCount) {
+      if(body.checkoutOutcome && body.checkoutOutcome!=='SUCCEEDED') throw new Error('이미 승인된 결제 요청입니다.');
       const options = await client.query(
         'SELECT event_id FROM application_options WHERE application_id=$1 ORDER BY event_id',
         [replay.rows[0].id],
@@ -69,11 +72,11 @@ export async function submitApplication(userId: string, body: Submission, connec
     }
 
     const events = await client.query(
-      `SELECT id,application_deadline,is_demo FROM events
+      `SELECT id,starts_at,area,application_deadline,is_demo FROM events
        WHERE id=ANY($1::uuid[]) AND status='OPEN' AND application_deadline>now()
        FOR SHARE`,
       databaseProvider === 'postgres' ? [selected.eventIds] : selected.eventIds,
-      `SELECT id,application_deadline,is_demo FROM events WHERE id IN (${selected.eventIds.map((_, i) => `$${i + 1}`).join(',')})
+      `SELECT id,starts_at,area,application_deadline,is_demo FROM events WHERE id IN (${selected.eventIds.map((_, i) => `$${i + 1}`).join(',')})
        AND status='OPEN' AND application_deadline>CURRENT_TIMESTAMP`,
     );
     if (events.rowCount !== selected.eventIds.length) {
@@ -98,6 +101,16 @@ export async function submitApplication(userId: string, body: Submission, connec
 
     if(new Set(events.rows.map(e=>Boolean(e.is_demo))).size>1)throw new Error('선택하신 일정은 함께 신청할 수 없습니다. 일정을 나누어 신청해 주세요.');
     const demoUser=(await client.query('SELECT is_demo FROM users WHERE id=$1',[userId])).rows[0]?.is_demo;
+    const outcome = body.checkoutOutcome ?? 'SUCCEEDED';
+    if (!['SUCCEEDED','FAILED','CANCELED'].includes(String(outcome))) throw new Error('결제 결과를 확인해 주세요.');
+    const selection = JSON.stringify({eventIds:[...selected.eventIds].sort(),pass:selected.pass});
+    const attempt = (await client.query<any>('SELECT * FROM payment_attempts WHERE request_key=$1',[body.requestKey])).rows[0];
+    if (attempt && (attempt.user_id!==userId || attempt.selection!==selection || attempt.outcome!==outcome)) throw new Error('이미 다른 결제 요청에 사용된 키입니다.');
+    if(outcome!=='SUCCEEDED') {
+      if(!attempt) await client.query('INSERT INTO payment_attempts(id,user_id,request_key,amount_cents,outcome,selection) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),userId,body.requestKey,selected.amount,outcome,selection]);
+      if(own) await client.query('COMMIT');
+      return {id:'',payment:outcome==='FAILED'?'FAILED':'CANCELED',amount:selected.amount,created:!attempt};
+    }
     const application = await client.query(
       `INSERT INTO applications(user_id,request_key,pass_choice,pass_uses,amount_cents,is_demo)
        VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
@@ -114,9 +127,11 @@ export async function submitApplication(userId: string, body: Submission, connec
     const payment = await client.query(
       `INSERT INTO payments(application_id,idempotency_key,amount_cents,status)
        VALUES($1,$2,$3,'PAID') RETURNING id`,
-      [applicationId, `mock-payment:${applicationId}`, selected.amount],
+      [applicationId, `virtual-payment:${applicationId}`, selected.amount],
     );
     const paymentId = payment.rows[0].id as string;
+    await client.query(`INSERT INTO payment_ledger(id,payment_id,request_key,kind,amount_cents) VALUES($1,$2,$3,'CHARGE',$4)`,[randomUUID(),paymentId,`charge:${paymentId}`,selected.amount]);
+    await client.query(`INSERT INTO payment_attempts(id,user_id,request_key,application_id,amount_cents,outcome,selection) VALUES($1,$2,$3,$4,$5,'SUCCEEDED',$6)`,[randomUUID(),userId,body.requestKey,applicationId,selected.amount,selection]);
 
     let entitlementId: string;
     if (selected.pass === 'EXISTING_PASS') {
@@ -171,6 +186,7 @@ export async function submitApplication(userId: string, body: Submission, connec
        VALUES($1,'APPLICATION_SUBMITTED','application',$2,$3::jsonb)`,
       [userId, applicationId, JSON.stringify({ eventIds: selected.eventIds, pass: selected.pass, amount: selected.amount })],
     );
+    await queueBusinessEvent(client,{key:`application:${applicationId}`,kind:'APPLICATION_RECEIVED',userId,applicationId,variables:{schedule:scheduleLabel(events.rows),deadline:events.rows.map(e=>new Date(e.application_deadline).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})).join(' / ')}});
     if (own) await client.query('COMMIT');
     return { id: applicationId, payment: 'PAID', amount: selected.amount, created: true };
   } catch (error) {

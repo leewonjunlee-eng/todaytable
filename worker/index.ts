@@ -1,3 +1,4 @@
+import {deliverBusinessEvent,queueBusinessEvent,scheduleRecruitmentAlerts} from '../lib/business-events';
 import { randomUUID } from 'node:crypto';
 import { databaseProvider, db } from '../lib/db';
 import { retryDelayMs } from '../lib/domain';
@@ -103,6 +104,11 @@ export async function processJob(job: Job, owner: string) {
         await client.query("UPDATE scheduled_jobs SET status='DONE',completed_at=now(),lease_owner=NULL,lease_until=NULL WHERE id=$1", [job.id]);
         await client.query('COMMIT'); return;
       }
+      if(new Date(gate.rows[0].application_deadline).getTime()>Date.now()){
+        await client.query("UPDATE scheduled_jobs SET status='PENDING',run_at=$2,next_attempt_at=$2,lease_owner=NULL,lease_until=NULL WHERE id=$1",[job.id,gate.rows[0].application_deadline]);
+        await client.query('COMMIT');return;
+      }
+
 
     }
 
@@ -114,21 +120,26 @@ export async function processJob(job: Job, owner: string) {
     );
     if (effect.rowCount) {
       switch (locked.rows[0].job_type) {
+        case 'DELIVER_BUSINESS_EVENT': {await deliverBusinessEvent(client,(locked.rows[0].payload as {id:string}).id);break;}
         case 'JOURNEY_REMINDER': {
           const payload = locked.rows[0].payload as { tableId?: string; applicationId?: string };
           if (!payload.tableId || !payload.applicationId) throw new Error('JOURNEY_REMINDER requires tableId/applicationId.');
-          const recipient = await client.query<any>(`SELECT tm.user_id,t.event_id,e.title FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id JOIN events e ON e.id=t.event_id WHERE tm.table_id=$1 AND tm.application_id=$2 AND tm.status='ACTIVE' AND t.status='CONFIRMED'`, [payload.tableId, payload.applicationId]);
+          const recipient = await client.query<any>(`SELECT tm.user_id,t.event_id,e.title,e.starts_at,v.name venue_name,v.address,coalesce(b.reservation_name,r.reservation_name) reservation_name,j.id room_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id JOIN events e ON e.id=t.event_id LEFT JOIN venues v ON v.id=t.venue_id LEFT JOIN table_reservations r ON r.table_id=t.id LEFT JOIN venue_booking_tasks b ON b.table_id=t.id LEFT JOIN journey_rooms j ON j.table_id=t.id WHERE tm.table_id=$1 AND tm.application_id=$2 AND tm.status='ACTIVE' AND t.status='CONFIRMED'`, [payload.tableId, payload.applicationId]);
           if (!recipient.rowCount) break;
-          await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by) VALUES($1,$2,$3,'IN_APP','SENT',$2)`, [recipient.rows[0].event_id, recipient.rows[0].user_id, `${recipient.rows[0].title} 식탁이 내일이에요. 채팅방에서 만남을 준비해 보세요.`]);
+          const r=recipient.rows[0],time=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'long',day:'numeric',weekday:'long',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(r.starts_at));
+          const message=`만남이 다가오고 있어요. ${time} · ${r.venue_name??'식당 안내 확인'} · ${r.address??''} · 예약명: ${r.reservation_name??'식탁 상세 확인'}. 식사비는 각자 부담하며 시작 48시간 이내에는 환불·참가권 복원이 제한됩니다. 채팅방에서 인사를 나누고 식탁 상세에서 준비사항을 확인해 주세요.`;
+          const businessId=await queueBusinessEvent(client,{key:`reminder:${job.id}`,kind:'REMINDER',userId:r.user_id,eventId:r.event_id,url:`/tables/${payload.tableId}`,variables:{schedule:time,venue:`${r.venue_name??''} · ${r.address??''}`,reservation:r.reservation_name??'식탁 상세 확인'},fallback:message});
+          await deliverBusinessEvent(client,businessId);
+          if(r.room_id)await client.query("INSERT INTO journey_messages(id,room_id,author_user_id,body,request_key,kind) VALUES($1,$2,NULL,$3,$4,'SYSTEM') ON CONFLICT(room_id,request_key) DO NOTHING",[randomUUID(),r.room_id,message,`reminder:${payload.tableId}:${new Date(r.starts_at).toISOString()}`]);
           break;
         }
         case 'JOURNEY_FEEDBACK_REQUEST': {
           const payload = locked.rows[0].payload as { tableId?: string };
           if (!payload.tableId) throw new Error('JOURNEY_FEEDBACK_REQUEST requires tableId.');
-          const recipients = await client.query<any>(`SELECT tm.user_id,t.event_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE tm.table_id=$1 AND tm.status='ACTIVE' AND t.status='CONFIRMED'`, [payload.tableId]);
+          const recipients = await client.query<any>(`SELECT tm.user_id,t.event_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE tm.table_id=$1 AND tm.status='ACTIVE' AND t.status='CONFIRMED' AND EXISTS(SELECT 1 FROM attendance_records ar WHERE ar.application_id=tm.application_id AND ar.event_id=t.event_id AND ar.status='ATTENDED') AND NOT EXISTS(SELECT 1 FROM journey_feedback f WHERE f.table_id=t.id AND f.author_user_id=tm.user_id)`, [payload.tableId]);
           if (!recipients.rowCount) break;
-          for (const recipient of recipients.rows) await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by) VALUES($1,$2,'식탁 후기를 남겨 주세요.','IN_APP','SENT',$2)`, [recipient.event_id, recipient.user_id]);
-          await client.query(`UPDATE attendance_records SET feedback_requested_at=now() WHERE application_id IN (SELECT application_id FROM table_members WHERE table_id=$1)`, [payload.tableId]);
+          for(const recipient of recipients.rows){const businessId=await queueBusinessEvent(client,{key:`feedback:${job.id}:${recipient.user_id}`,kind:'FEEDBACK',userId:recipient.user_id,eventId:recipient.event_id,url:`/tables/${payload.tableId}`,fallback:'식탁 후기를 남겨 주세요.'});await deliverBusinessEvent(client,businessId);}
+          await client.query(`UPDATE attendance_records SET feedback_requested_at=now() WHERE status='ATTENDED' AND application_id IN (SELECT application_id FROM table_members WHERE table_id=$1)`, [payload.tableId]);
           break;
         }
         case 'POST_CONTENT': {
@@ -136,9 +147,13 @@ export async function processJob(job: Job, owner: string) {
           if (!payload.tableId || !payload.eventId) throw new Error('POST_CONTENT requires tableId/eventId.');
           const activeTable = await client.query<any>(`SELECT 1 FROM dining_tables WHERE id=$1 AND status='CONFIRMED'`, [payload.tableId]);
           if (!activeTable.rowCount) break;
-          const room = await client.query<any>('SELECT id FROM journey_rooms WHERE table_id=$1', [payload.tableId]);
+          const room = await client.query<any>('SELECT id,topics FROM journey_rooms WHERE table_id=$1', [payload.tableId]);
           if (!room.rowCount) throw new Error('Content room not found.');
-          const content = ['오늘 가장 기대하는 것은 무엇인가요?', '요즘 나를 웃게 한 일은 무엇인가요?', '다음 주말에 해 보고 싶은 일은 무엇인가요?', '아이스브레이커: 지금 먹고 싶은 메뉴를 하나씩 말해 볼까요?'];
+          const topics=typeof room.rows[0].topics==='string'?JSON.parse(room.rows[0].topics):room.rows[0].topics;
+          const {selectTableContent}=await import('../lib/table-content');
+          const selection=await selectTableContent(client,payload.tableId,Array.isArray(topics)?topics:['오늘 가장 기대하는 것은 무엇인가요?','요즘 나를 웃게 한 일은 무엇인가요?','다음 주말에 해 보고 싶은 일은 무엇인가요?']);
+          const content = [...selection.topics.slice(0,3),`아이스브레이커 · ${selection.game}`];
+          await client.query("INSERT INTO audit_logs(action,entity_type,entity_id,after_data) VALUES('TABLE_CONTENT_POSTED','dining_table',$1,$2)",[payload.tableId,JSON.stringify({templateId:selection.templateId,atmosphere:selection.atmosphere})]);
           for (const [index, body] of content.entries()) await client.query(`INSERT INTO journey_messages(id,room_id,author_user_id,body,request_key,kind) VALUES($1,$2,NULL,$3,$4,'SYSTEM') ON CONFLICT(room_id,request_key) DO NOTHING`, [randomUUID(), room.rows[0].id, body, `content:${payload.tableId}:${index}`]);
           break;
         }
@@ -150,7 +165,7 @@ export async function processJob(job: Job, owner: string) {
         }
         case 'FEEDBACK_FOLLOWUP': {
           const payload = locked.rows[0].payload as { tableId?: string };
-          const recipients = await client.query<any>(`SELECT tm.user_id,t.event_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE tm.table_id=$1 AND tm.status='ACTIVE' AND t.status='CONFIRMED' AND NOT EXISTS (SELECT 1 FROM journey_feedback f WHERE f.table_id=tm.table_id AND f.author_user_id=tm.user_id)`, [payload.tableId]);
+          const recipients = await client.query<any>(`SELECT tm.user_id,t.event_id FROM table_members tm JOIN dining_tables t ON t.id=tm.table_id WHERE tm.table_id=$1 AND tm.status='ACTIVE' AND t.status='CONFIRMED' AND EXISTS(SELECT 1 FROM attendance_records ar WHERE ar.application_id=tm.application_id AND ar.event_id=t.event_id AND ar.status='ATTENDED') AND NOT EXISTS (SELECT 1 FROM journey_feedback f WHERE f.table_id=tm.table_id AND f.author_user_id=tm.user_id)`, [payload.tableId]);
           for (const recipient of recipients.rows) await client.query(`INSERT INTO notifications(event_id,recipient_user_id,message,channel,status,sent_by) VALUES($1,$2,'아직 답하지 않은 식탁 후기를 남겨 주세요.','IN_APP','SENT',$2)`, [recipient.event_id, recipient.user_id]);
           break;
         }
@@ -169,17 +184,21 @@ export async function processJob(job: Job, owner: string) {
         case 'REPAIR_TABLE': {
           const payload = locked.rows[0].payload as { tableId?: string; eventId?: string };
           if (!payload.tableId) throw new Error('REPAIR_TABLE requires tableId.');
-          await repairTable(payload.tableId, payload.eventId, client);
+          const repair=await repairTable(payload.tableId, payload.eventId, client);
+          if(repair.status==='REVIEW'&&'proposalId' in repair&&repair.proposalId){
+            const target=(await client.query<any>('SELECT event_id FROM matching_proposals WHERE id=$1',[repair.proposalId])).rows[0];
+            if(target)await runMatching(target.event_id,'automatic-repair-v3',client);
+          }
           break;
         }
         case 'PUSH_NOTIFICATION': {
-          const payload = locked.rows[0].payload as { recipientUserId?: string; message?: string };
+          const payload = locked.rows[0].payload as { recipientUserId?: string; message?: string;actionUrl?:string };
           if (!payload.recipientUserId || typeof payload.message !== 'string') throw new Error('PUSH_NOTIFICATION requires recipientUserId/message.');
           const subscriptions = await client.query<any>(`SELECT id,subscription FROM push_subscriptions WHERE user_id=$1 AND active=true FOR UPDATE`, [payload.recipientUserId]);
           for (const subscription of subscriptions.rows) {
             const delivery = await client.query<any>(`INSERT INTO push_deliveries(id,job_id,subscription_id,recipient_user_id,status,attempts) VALUES($1,$2,$3,$4,'PENDING',1) ON CONFLICT(job_id,subscription_id) DO UPDATE SET attempts=push_deliveries.attempts+1,status='PENDING' RETURNING id`, [randomUUID(), job.id, subscription.id, payload.recipientUserId]);
             try {
-              const response = await activePushTransport(typeof subscription.subscription === 'string' ? JSON.parse(subscription.subscription) : subscription.subscription, JSON.stringify({ body: payload.message }));
+              const response = await activePushTransport(typeof subscription.subscription === 'string' ? JSON.parse(subscription.subscription) : subscription.subscription, JSON.stringify({ body: payload.message,url:payload.actionUrl??'/notifications' }));
               if (response.statusCode === 404 || response.statusCode === 410) { await client.query(`UPDATE push_subscriptions SET active=false,updated_at=now() WHERE id=$1`, [subscription.id]); await client.query(`UPDATE push_deliveries SET status='DISABLED',last_error='subscription expired' WHERE id=$1`, [delivery.rows[0].id]); }
               else { await client.query(`UPDATE push_deliveries SET status='SENT',sent_at=now(),last_error=NULL WHERE id=$1`, [delivery.rows[0].id]); }
             } catch (error) {
@@ -215,12 +234,8 @@ export async function processJob(job: Job, owner: string) {
         case 'PROCESS_REFUND': {
           const payload = locked.rows[0].payload as { resolutionId?: string };
           if (!payload.resolutionId) throw new Error('PROCESS_REFUND requires resolutionId.');
-          const request = await client.query<any>(`SELECT id,payment_id FROM refund_requests WHERE resolution_id=$1 FOR UPDATE`, [payload.resolutionId]);
-          if (!request.rowCount) throw new Error('Refund request not found.');
-          await client.query(`UPDATE refund_requests SET status='PROCESSING' WHERE id=$1 AND status='REQUESTED'`, [request.rows[0].id]);
-          await client.query(`UPDATE payments SET status='REFUNDED',updated_at=now() WHERE id=$1 AND status IN ('REFUND_REQUESTED','REFUND_PROCESSING')`, [request.rows[0].payment_id]);
-          await client.query(`UPDATE refund_requests SET status='COMPLETED',completed_at=now() WHERE id=$1`, [request.rows[0].id]);
-          await client.query(`UPDATE resolution_cases SET status='REFUNDED',updated_at=now() WHERE id=$1`, [payload.resolutionId]);
+          const {completeVirtualRefund}=await import('../lib/virtual-transactions');
+          await completeVirtualRefund(client,payload.resolutionId);
           break;
         }
         case 'UPDATE_PREFERENCE_SIGNALS': {
@@ -308,8 +323,15 @@ export async function scheduleDueMatchJobs() {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    const due = await client.query(`SELECT e.id,e.application_deadline FROM events e WHERE e.status IN ('OPEN','CLOSED') AND e.application_deadline<=now()`, [], `SELECT e.id,e.application_deadline FROM events e WHERE e.status IN ('OPEN','CLOSED') AND e.application_deadline<=CURRENT_TIMESTAMP`);
-    for (const event of due.rows) await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',${databaseProvider === 'postgres' ? '$2::jsonb' : '$2'},now()) ON CONFLICT(job_key) DO UPDATE SET run_at=excluded.run_at WHERE scheduled_jobs.status='PENDING'`, [`match-event:${event.id}`, JSON.stringify({ eventId:event.id })], `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO UPDATE SET run_at=excluded.run_at WHERE scheduled_jobs.status='PENDING'`);
+    const due = await client.query(`SELECT e.id,e.application_deadline FROM events e WHERE e.status IN ('OPEN','CLOSED') AND e.application_deadline<=now() AND e.starts_at>now()`, [], `SELECT e.id,e.application_deadline FROM events e WHERE e.status IN ('OPEN','CLOSED') AND e.application_deadline<=CURRENT_TIMESTAMP AND e.starts_at>CURRENT_TIMESTAMP`);
+    for (const event of due.rows) await client.query(`INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',${databaseProvider === 'postgres' ? '$2::jsonb' : '$2'},now()) ON CONFLICT(job_key) DO UPDATE SET run_at=excluded.run_at WHERE scheduled_jobs.status='PENDING'`, [`match-event:automatic-v3:${event.id}`, JSON.stringify({ eventId:event.id })], `INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'MATCH_EVENT',$2,CURRENT_TIMESTAMP) ON CONFLICT(job_key) DO UPDATE SET run_at=excluded.run_at WHERE scheduled_jobs.status='PENDING'`);
+    if(databaseProvider==='postgres')await client.query("SELECT pg_advisory_xact_lock(hashtextextended('todaytable:lifecycle',0))");
+    const {offerVacantSeats}=await import('../lib/waitlist');
+    await offerVacantSeats(client);
+    await scheduleRecruitmentAlerts(client);
+    const underfilled=(await client.query<any>("SELECT t.id,t.event_id FROM dining_tables t JOIN events e ON e.id=t.event_id WHERE t.status IN ('CONFIRMED','EXCEPTION') AND e.starts_at>now() AND (SELECT count(*) FROM table_members tm WHERE tm.table_id=t.id AND tm.status='ACTIVE')<4 AND NOT EXISTS(SELECT 1 FROM waitlist_offers w WHERE w.table_id=t.id AND w.status='OFFERED' AND w.expires_at>now())")).rows;
+    for(const t of underfilled)await client.query("INSERT INTO scheduled_jobs(job_key,job_type,payload,run_at) VALUES($1,'REPAIR_TABLE',$2,now()) ON CONFLICT(job_key) DO NOTHING",[`recovery:${t.id}:${Math.floor(Date.now()/300000)}`,JSON.stringify({tableId:t.id,eventId:t.event_id})]);
+
     await client.query('COMMIT');
     return due.rowCount;
   } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
