@@ -1,6 +1,7 @@
+import { isOperatorHost } from '@/lib/site-origins';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { sameOrigin } from '@/lib/http';
+import { sameOrigin, publicRequestOrigin } from '@/lib/http';
 import { tokenHash } from '@/lib/security';
 
 export async function POST(request: Request) {
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
       // The browser cookie is still removed if the session store is unavailable.
     }
   }
-  const response = NextResponse.redirect(new URL('/login', process.env.APP_URL ?? request.url), 303);
+  const response = NextResponse.redirect(new URL(isOperatorHost(request.headers,request.url)?'/admin/login':'/login', publicRequestOrigin(request)), 303);
   response.cookies.set('todaytable_session', '', {
     httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict',
     path: '/', maxAge: 0,

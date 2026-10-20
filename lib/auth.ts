@@ -30,8 +30,8 @@ export async function requireUser(): Promise<AuthUser> {
 }
 
 export async function requireAdmin(): Promise<AuthUser> {
-  const user = await requireUser();
-  if (user.role !== 'ADMIN') redirect('/');
+  const user = await currentUser();
+  if (!user || user.role !== 'ADMIN') redirect('/admin/login');
   return user;
 }
 

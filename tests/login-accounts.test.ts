@@ -29,6 +29,17 @@ test('short login accounts retain identity and permissions, rotate sessions, and
    }
    if(a.teamRole){const o=(await db.query<any>('SELECT display_name,team_role FROM operator_profiles WHERE user_id=$1',[row.id])).rows[0];assert.equal(o.display_name,a.name);assert.equal(o.team_role,a.teamRole);}
   }
+  const operatorLogin=async(email:string)=>POST(new Request('http://localhost/api/auth/login',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({email,password:'simple1234',audience:'operator'})}));
+  const participant=LOGIN_ACCOUNTS.find(a=>a.role==='PARTICIPANT')!;
+  const operator=LOGIN_ACCOUNTS.find(a=>a.teamRole)!;
+  const sessionsBefore=(await db.query('SELECT * FROM sessions')).rowCount;
+  assert.equal((await operatorLogin(participant.email)).status,403);
+  assert.equal((await db.query('SELECT * FROM sessions')).rowCount,sessionsBefore);
+  const operatorResponse=await operatorLogin(operator.email);
+  assert.equal(operatorResponse.status,200);assert.equal((await operatorResponse.json()).next,'/admin');
+  await db.query('UPDATE operator_profiles SET active=false WHERE user_id=$1',[original.get(operator.email)]);
+  assert.equal((await operatorLogin(operator.email)).status,403);
+  await db.query('UPDATE operator_profiles SET active=true WHERE user_id=$1',[original.get(operator.email)]);
   await db.query("INSERT INTO users(email,password_hash,role) VALUES('operator2@todaytable.local','unchanged','ADMIN')");
   const before=(await db.query('SELECT id,email,password_hash FROM users ORDER BY email')).rows;
   await assert.rejects(simplifyLoginAccounts('different-password'),/계정 연결/);
