@@ -13,3 +13,9 @@
 .recovery-page{max-width:800px;margin:10vh auto;padding:40px 24px;color:#293c31}.recovery-page h1{font:400 clamp(28px,4vw,42px)/1.4 'Gowun Batang',serif;text-wrap:balance}.recovery-page>p{line-height:1.9;color:#586651}.recovery-page .button-row{margin-top:28px;flex-wrap:wrap}
 .guide-demo-caption{font-size:12px;color:#586651;line-height:1.9;margin:20px 0 0}.auth-card>p.auth-demo-note{font-size:12px;line-height:1.9;margin:14px 0 22px}
 @media(max-width:700px){.guide-screen img{aspect-ratio:390/740}.guide-stage h2{scroll-margin-top:20px}}
+/* Preserve full screen text sizing on phones and open the exact displayed source. */
+.guide-screen figcaption .guide-enlarge{display:none}
+.guide-screen figcaption .guide-enlarge-desktop{display:inline-flex}
+@media(max-width:700px){.guide-screen{margin-inline:-20px;width:calc(100% + 40px);border-inline:0;border-radius:0}.guide-screen img{aspect-ratio:430/740}.guide-screen figcaption{padding-inline:20px;font-size:12px}.guide-screen figcaption a{font-size:12px;min-height:44px}.guide-screen figcaption .guide-enlarge-desktop{display:none}.guide-screen figcaption .guide-enlarge-large{display:inline-flex}}
+@media(max-width:410px){.guide-screen img{aspect-ratio:390/740}.guide-screen figcaption .guide-enlarge-large{display:none}.guide-screen figcaption .guide-enlarge-medium{display:inline-flex}}
+@media(max-width:375px){.guide-screen img{aspect-ratio:360/740}.guide-screen figcaption .guide-enlarge-medium{display:none}.guide-screen figcaption .guide-enlarge-small{display:inline-flex}}

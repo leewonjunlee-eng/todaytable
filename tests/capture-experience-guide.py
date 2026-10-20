@@ -1,5 +1,5 @@
 """Capture synthetic local screens only; run prepare-experience-guide.ts first."""
-import json
+import json, subprocess
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import argparse
@@ -9,6 +9,7 @@ assert urlparse(a.base).hostname in ['localhost','127.0.0.1'],'Local fixture req
 base=a.base.rstrip('/')
 s=json.loads(Path('.data/final-guide/screenshots.json').read_text())
 out=Path('public/guide');out.mkdir(parents=True,exist_ok=True)
+raw=Path('.data/guide-quality/raw');raw.mkdir(parents=True,exist_ok=True)
 with sync_playwright() as p:
     browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
     for role,person,route in [
@@ -21,8 +22,8 @@ with sync_playwright() as p:
       ('operator-bookings','operator','/admin/bookings'),
       ('operator-exceptions','operator','/admin/exceptions')]:
         if a.only and role!=a.only:continue
-        for width,height,suffix in [(1240,880,''),(390,740,'-mobile')]:
-            ctx=browser.new_context(viewport={'width':width,'height':height},device_scale_factor=1)
+        for width,height,scale,suffix in [(1240,880,2,'@2x'),(360,740,3,'-mobile-360@3x'),(390,740,3,'-mobile-390@3x'),(430,740,3,'-mobile-430@3x')]:
+            ctx=browser.new_context(viewport={'width':width,'height':height},device_scale_factor=scale)
             ctx.add_init_script("sessionStorage.setItem('todaytable-review-intro-v1','seen')")
             ctx.add_cookies([{'name':'todaytable_session','value':s[person]['token'],'url':base}])
             page=ctx.new_page();page.goto(base+route);page.wait_for_load_state('networkidle')
@@ -36,8 +37,12 @@ with sync_playwright() as p:
                 page.get_by_role('button',name='예약 정보 관리').first.click()
                 page.locator('.booking-card').first.scroll_into_view_if_needed()
                 page.evaluate("window.scrollTo(0,document.querySelector('.booking-card').getBoundingClientRect().top+window.scrollY-85)")
+            page.evaluate('document.fonts.ready')
             page.evaluate('document.activeElement.blur()')
-            page.screenshot(path=str(out/(role+suffix+'.jpg')),type='jpeg',quality=78)
+            original=raw/(role+suffix+'.png')
+            page.screenshot(path=str(original),type='png',animations='disabled',caret='hide',scale='device')
+            # Lossless encoding: preserve the rendered UI pixels rather than JPEG-compressing text.
+            subprocess.run(['node','--input-type=module','-e',"import sharp from 'sharp'; await sharp(process.argv[1]).webp({lossless:true,effort:6}).toFile(process.argv[2]); const a=await sharp(process.argv[1]).ensureAlpha().raw().toBuffer(); const b=await sharp(process.argv[2]).ensureAlpha().raw().toBuffer(); if(!a.equals(b))throw Error('Screenshot pixels changed during encoding');",str(original),str(out/(role+suffix+'.webp'))],check=True)
             print(role, page.locator('h1').all_text_contents(),flush=True)
             ctx.close()
     browser.close()

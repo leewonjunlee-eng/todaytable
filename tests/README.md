@@ -78,3 +78,8 @@ APP_URL=http://127.0.0.1:3340 node --env-file=.data/operator-browser.env node_mo
 ```
 
 다른 터미널에서 `python tests/experience-guide-browser.py --section guide`, `python tests/experience-guide-browser.py --section journeys`로 실행합니다. 결과와 캡처는 `.data/final-guide/browser/`에 저장합니다. 가이드 이미지를 다시 만들 때만 `python tests/capture-experience-guide.py`를 실행합니다. `--only participant-table`처럼 한 화면만 재촬영할 수도 있습니다. fixture 생성기는 가상 프로필 이름·예약 정보·미래 참석 상태를 정리하고 전용 체험 계정의 비밀번호를 새로 만들어 보호 파일에 저장합니다. 운영 DB·실제 계정은 사용하지 않습니다.
+
+
+### 가이드 고해상도 이미지 검증
+
+`tests/capture-experience-guide.py`는 모바일 360·390·430px 각각 DPR 3, 데스크톱 DPR 2에서 글꼴 로딩 후 촬영하고, 설치된 Next.js의 `sharp`로 무손실 WebP를 생성합니다. 인코딩 전후 픽셀 일치를 검사합니다. 원본 PNG는 `.data/guide-quality/raw/`에 보관합니다. 캡처를 갱신한 뒤 빌드하고 `python tests/guide-image-quality-browser.py --base http://127.0.0.1:3340`로 32개 화면·해상도 조합과 원본 열기를 확인합니다.
