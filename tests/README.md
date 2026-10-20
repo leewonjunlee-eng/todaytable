@@ -83,3 +83,8 @@ APP_URL=http://127.0.0.1:3340 node --env-file=.data/operator-browser.env node_mo
 ### 가이드 고해상도 이미지 검증
 
 `tests/capture-experience-guide.py`는 모바일 360·390·430px 각각 DPR 3, 데스크톱 DPR 2에서 글꼴 로딩 후 촬영하고, 설치된 Next.js의 `sharp`로 무손실 WebP를 생성합니다. 인코딩 전후 픽셀 일치를 검사합니다. 원본 PNG는 `.data/guide-quality/raw/`에 보관합니다. 캡처를 갱신한 뒤 빌드하고 `python tests/guide-image-quality-browser.py --base http://127.0.0.1:3340`로 32개 화면·해상도 조합과 원본 열기를 확인합니다.
+
+
+### 참가자 모바일 화면 검증
+
+위 로컬 fixture 서버에서 `python tests/participant-mobile-browser.py --base http://127.0.0.1:3342 --section screens`를 실행합니다. `--section controls`는 날짜·지역·참가권 선택과 채팅 입력·작은 높이·터치 영역을 검사하고 결제를 제출하지 않습니다. `--section scope`는 700/701px 경계, 데스크톱 및 운영자 화면의 범위 분리를 검사합니다. 기본 폭은 360·390·430px이며 `--widths 360`으로 좁힐 수 있습니다. 운영 주소는 허용하지 않습니다.
