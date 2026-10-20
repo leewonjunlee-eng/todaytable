@@ -1,3 +1,4 @@
+import {loginDestination} from '@/lib/login-destination';
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { newSessionToken, requireSecret, tokenHash, verifyPassword } from '@/lib/security';
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
       "INSERT INTO sessions(user_id,token_hash,expires_at) VALUES($1,$2,datetime('now','+7 days'))",
     );
     const profile=rows[0].role==='PARTICIPANT'?(await db.query('SELECT 1 FROM profiles WHERE user_id=$1',[rows[0].id])).rowCount:1;
-    const response=NextResponse.json({role:rows[0].role,next:operatorLogin?'/admin':profile?'/':'/profile/test'});
+    const response=NextResponse.json({role:rows[0].role,next:profile?(loginDestination(body.next,operatorLogin)??(operatorLogin?'/admin':'/')):'/profile/test'});
     response.cookies.set('todaytable_session',token,{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'strict',path:'/',maxAge:60*60*24*7});
     return response;
   } catch { return NextResponse.json({error:'로그인할 수 없습니다.'},{status:500}); }

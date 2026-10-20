@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import {usePathname} from 'next/navigation';
+import {formatKstDateTime} from '@/lib/date-format';
 import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {UiIcon} from './ui-icon';
 import {SiteNav} from './site-nav';
@@ -17,34 +19,41 @@ export function safeError(body: any, fallback = '요청을 처리하지 못했�
   return typeof body?.error === 'string' ? body.error : fallback;
 }
 
+export class JourneyError extends Error {
+  constructor(message: string, public status: number) { super(message); this.name = 'JourneyError'; }
+}
+
 export async function journeyFetch(path: string, init?: RequestInit) {
   const response = await fetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(safeError(body));
+  if (!response.ok) throw new JourneyError(safeError(body), response.status);
   return body;
 }
 
-export function useJourney(path: string, interval?: number) {
+export function useJourney(path: string | null, interval?: number) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState('');
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const mounted = useRef(false);
   const inFlight = useRef<Promise<void> | null>(null);
 
   const load = useCallback((signal?: AbortSignal): Promise<void> => {
+    if (!path) return Promise.resolve();
     if (inFlight.current) return inFlight.current;
 
     const request = (async () => {
-      if (mounted.current) setError('');
+      if (mounted.current) { setError(''); setErrorStatus(null); }
       try {
         const next = await journeyFetch(path, { signal });
         if (!signal?.aborted && mounted.current) setData(next);
       } catch (err) {
         if (signal?.aborted || !mounted.current) return;
         setError(err instanceof Error ? err.message : '불러오지 못했어요.');
+        setErrorStatus(err instanceof JourneyError ? err.status : null);
       } finally {
         if (!signal?.aborted && mounted.current) setLoading(false);
       }
@@ -62,8 +71,9 @@ export function useJourney(path: string, interval?: number) {
 
   useEffect(() => {
     mounted.current = true;
-    setLoading(true);
+    setLoading(Boolean(path));
     setData(null);
+    if (!path) { setError(''); setErrorStatus(null); return () => { mounted.current = false; }; }
     const controller = new AbortController();
     void load(controller.signal);
     const timer = interval
@@ -77,12 +87,13 @@ export function useJourney(path: string, interval?: number) {
     };
   }, [interval, load]);
 
-  return { data, error, loading, refresh };
+  return { data, error, errorStatus, loading, refresh };
 }
 
 export function JourneyState({
   loading,
   error,
+  errorStatus,
   data,
   empty,
   onRefresh,
@@ -90,22 +101,28 @@ export function JourneyState({
 }: {
   loading: boolean;
   error: string;
+  errorStatus?: number | null;
   data?: unknown;
   empty?: boolean;
   onRefresh: () => Promise<void>;
   children: ReactNode;
 }) {
+  const pathname = usePathname();
+  const admin = pathname.startsWith('/admin');
+  const needsLogin=errorStatus===401||(admin&&errorStatus===403);
+  const returnPath=pathname+(typeof window==='undefined'?'':window.location.search);
+  const loginHref=`${admin?'/admin/login':'/login'}?next=${encodeURIComponent(returnPath)}`;
   if (loading) return <div className="journey-state" role="status">불러오는 중이에요…</div>;
   if (error && data == null) {
     return (
       <div className="journey-state error-state" role="alert">
         <p>{error}</p>
-        <button className="button quiet" type="button" onClick={onRefresh}>다시 시도</button>
+        {needsLogin ? <Link className="button primary" href={loginHref}>로그인하고 계속하기</Link> : errorStatus === 404 ? <div className="button-row"><Link className="button primary" href={admin ? '/admin' : '/applications'}>{admin ? '운영 현황으로' : '내 만남으로'}</Link><Link className="button quiet" href={admin ? '/admin/applications' : '/'}>{admin ? '신청 현황 보기' : '처음으로'}</Link></div> : <button className="button quiet" type="button" onClick={onRefresh}>다시 시도</button>}
       </div>
     );
   }
   if (empty) return <div className="journey-state"><p>아직 표시할 내용이 없어요.</p></div>;
-  return <>{error&&<div className="notice" role="alert"><p>최신 정보를 불러오지 못했어요. 기존 화면과 입력을 유지했어요. {error}</p><button className="button quiet" type="button" onClick={onRefresh}>다시 시도</button></div>}{children}</>;
+  return <>{error&&<div className="notice" role="alert"><p>최신 정보를 불러오지 못했어요. 기존 화면과 입력을 유지했어요. {error}</p>{needsLogin?<Link className="button primary" href={loginHref}>로그인하고 계속하기</Link>:<button className="button quiet" type="button" onClick={onRefresh}>다시 시도</button>}</div>}{children}</>;
 }
 
 export function JourneyLayout({
@@ -184,13 +201,13 @@ export function ApplicationCard({
     <article className="panel application-card">
       <div className="section-title">
         <div>
-          <div className="eyebrow">{application.created_at ? new Date(application.created_at).toLocaleDateString('ko-KR') : '신청'}</div>
+          <div className="eyebrow">{application.created_at ? formatKstDateTime(application.created_at) : '신청'}</div>
           <h2>{application.events?.map((event: any) => event.title).join(' · ') || '신청한 식탁'}</h2>
         </div>
         <StatusPill value={application.matching_status || application.status} />
       </div>
       <p>{application.explanation || '신청 상태와 다음 안내를 확인해 주세요.'}</p>
-      {application.payment_status && <p className="muted">{moneyStatus[application.payment_status] || '결제 상태 확인 중'} · ₩{Number(application.amount_cents || 0).toLocaleString()}</p>}{application.application_deadline && <p className="muted">다음 안내 예정: {new Date(application.application_deadline).toLocaleString('ko-KR')}까지</p>}
+      {application.payment_status && <p className="muted">{moneyStatus[application.payment_status] || '결제 상태 확인 중'} · ₩{Number(application.amount_cents || 0).toLocaleString()}</p>}{application.application_deadline && <p className="muted">다음 안내 예정: {formatKstDateTime(application.application_deadline)}까지</p>}
       {resolution && canAct && onResolution && (
         <div className="notice">
           <strong>{resolution.status === 'FAILED' ? '일정 변경을 다시 선택해 주세요' : '일정 조정이 필요해요'}</strong>
@@ -201,7 +218,7 @@ export function ApplicationCard({
               {resolution.alternatives.map((option: any) => (
                 <label key={option.event_id} className="option-card">
                   <input type="radio" name={`event-${application.id}`} value={option.event_id} checked={selectedEvent === option.event_id} onChange={() => setSelectedEvent(option.event_id)} />
-                  <span><strong>{option.title || '대체 일정'}</strong><small>{option.area || '지역 미정'} · {option.starts_at ? new Date(option.starts_at).toLocaleString('ko-KR') : '시간 미정'}</small></span>
+                  <span><strong>{option.title || '대체 일정'}</strong><small>{option.area || '지역 미정'} · {option.starts_at ? formatKstDateTime(option.starts_at) : '시간 미정'}</small></span>
                 </label>
               ))}
             </fieldset>

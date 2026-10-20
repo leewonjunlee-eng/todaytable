@@ -1,5 +1,11 @@
-# 현재 현황 — 2026-10-20 사용자·운영자 주소 분리
+# 현재 현황 — 2026-10-20 참가자·운영자 체험 가이드
 
+
+## 처음 링크를 연 사람을 위한 체험 가이드
+
+홈의 첫 방문 안내에서 참가자·운영자 여정을 고르고, 공개 `/guide`에서 로그인 없이 역할별 4단계를 실제 화면으로 볼 수 있습니다. 데스크톱·모바일 캡처 각 8장, 안내 건너뛰기·재열기·단계 공유 링크를 제공합니다. 로그인은 원래 화면으로 돌아오고, 모바일 운영자 메뉴·오류 복구·신고 링크·체크인 안내·대기 신청의 다음 행동도 함께 보완했습니다.
+
+Claude Opus 5.5와 읽기 전용 검토 3회를 수행하고 Codex가 제작·실행 검증했습니다. 전체 테스트 98개 중 93 통과·실패 0·PostgreSQL 전용 5 건너뜀, production build·TypeScript 통과. 브라우저는 가이드 9개 + 실제 여정 8개 그룹 통과·JavaScript 오류 0입니다. 검증 범위와 캡처 출처는 [체험 가이드 제작·검토 기록](EXPERIENCE_GUIDE_20261020.md)에 구분합니다. [참가자 가이드](https://todaytable-production.up.railway.app/guide?role=participant) · [운영자 가이드](https://todaytable-production.up.railway.app/guide?role=operator).
 
 ## 사용자·운영자 진입점 분리 — 2026-10-20
 

@@ -1,0 +1,2 @@
+import Link from 'next/link';
+export default function NotFound(){return <main id="main-content" className="recovery-page"><p className="guide-label">페이지를 찾을 수 없어요</p><h1>잠시, 길이 달라졌네요.</h1><p>주소가 바뀌었거나 더 이상 제공하지 않는 화면입니다.<br/>홈에서 다시 시작하거나 이용 가이드에서 다음 단계를 찾아보세요.</p><div className="button-row"><Link className="button primary" href="/">홈으로 가기</Link><Link className="button quiet" href="/guide">이용 가이드 보기</Link></div></main>;}

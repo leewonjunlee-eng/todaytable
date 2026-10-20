@@ -62,3 +62,19 @@ python3 tests/showcase-browser.py --base http://localhost:3101
 `tests/cross-review-browser.py`는 로컬 운영자 fixture의 세션을 사용합니다. `tests/prepare-operator-browser.ts`를 실행하고 해당 환경 파일로 마지막 production standalone bundle을 제공한 뒤 Python Playwright로 실행합니다. 기본 주소는 `http://127.0.0.1:3326`이며 `--base`, `--out`으로 변경합니다. 결제/환불·장애·동시 편집·병합 상태는 API 응답 통제로 재현하고, 실제 checkout 검증과 예외 목록은 격리 서버 API로 확인합니다. 운영 사이트는 허용하지 않습니다.
 
 `tests/virtual-payments.test.ts`에는 SINGLE/THREE_PASS의 환불 대기·실패 → 직접 취소/HOLD/TRANSFER 차단과 중복 환불 방지가 포함됩니다. `tests/{sqlite,postgres}.integration.test.ts`는 예외 재실패 시 동일 행 재개와 성공 시 해결을 검증합니다. `tests/prd-completion.test.ts`는 성별 미선택 상태의 결제 차단과 유료 신청 후 미선택 변경 거부를 검증합니다. 상세 범위·결과·한계는 [교차 검토 보고서](../docs/CROSS_REVIEW_20261019.md)를 확인하세요.
+
+
+## 첫 방문·역할별 가이드와 최종 여정 확인 (2026-10-20)
+
+`tests/login-destination.test.ts`는 로그인 복귀 주소의 내부 경로·역할 제한과 외부 주소 거부를 검사합니다.
+
+브라우저 준비는 다음 순서입니다. 모든 fixture는 `.data/operator-browser.sqlite` 전용이며 운영 주소는 허용하지 않습니다. Playwright가 설치된 Python을 사용합니다.
+
+```bash
+node --import tsx tests/prepare-operator-browser.ts
+node --env-file=.data/operator-browser.env --import tsx tests/prepare-experience-guide.ts
+npm run build
+APP_URL=http://127.0.0.1:3340 node --env-file=.data/operator-browser.env node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3340
+```
+
+다른 터미널에서 `python tests/experience-guide-browser.py --section guide`, `python tests/experience-guide-browser.py --section journeys`로 실행합니다. 결과와 캡처는 `.data/final-guide/browser/`에 저장합니다. 가이드 이미지를 다시 만들 때만 `python tests/capture-experience-guide.py`를 실행합니다. `--only participant-table`처럼 한 화면만 재촬영할 수도 있습니다. fixture 생성기는 가상 프로필 이름·예약 정보·미래 참석 상태를 정리하고 전용 체험 계정의 비밀번호를 새로 만들어 보호 파일에 저장합니다. 운영 DB·실제 계정은 사용하지 않습니다.

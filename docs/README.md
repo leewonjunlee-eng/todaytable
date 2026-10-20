@@ -4,6 +4,7 @@
 
 | 목적 | 문서 |
 | --- | --- |
+| 처음 접속하는 사람의 참가자·운영자 가이드와 최종 개선 | [2026-10-20 체험 가이드](EXPERIENCE_GUIDE_20261020.md) |
 | 사용자·운영자 주소와 도메인 연결 | [주소 분리](SITE_ADDRESSES.md) |
 | PRD·사용자/운영자 흐름 개선·Opus 5.5 반복 교차 검토 | [교차 검토 보고서](CROSS_REVIEW_20261019.md), [Claude 원문](CLAUDE_CROSS_REVIEW_20261019.md) |
 | 화면 개편·가상 설문 294행 전체 활용·GitHub 스킬 | [2026-10-19 경험 개편](EXPERIENCE_REDESIGN_20261019.md) |

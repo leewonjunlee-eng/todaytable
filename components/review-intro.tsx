@@ -1,28 +1,28 @@
 'use client';
-
-import {useEffect, useRef, useState} from 'react';
-
+import Link from 'next/link';
+import {usePathname} from 'next/navigation';
+import {useEffect,useRef,useState} from 'react';
+const storageKey='todaytable-guide-intro-v2';
 export function ReviewIntro() {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [open, setOpen] = useState(false);
-  const dismiss = () => {
-    try { sessionStorage.setItem('todaytable-review-intro-v1', 'seen'); } catch {}
-    setOpen(false);
-  };
-  useEffect(() => {
-    let seen = false;
-    try { seen = sessionStorage.getItem('todaytable-review-intro-v1') === 'seen'; } catch {}
-    if (!seen) setOpen(true);
-  }, []);
-  useEffect(() => {
-    if (open && dialog.current && !dialog.current.open) dialog.current.showModal();
-  }, [open]);
-  if (!open) return null;
-  return <dialog ref={dialog} className="review-intro" aria-labelledby="review-intro-title" aria-describedby="review-intro-description" onCancel={dismiss} onKeyDown={event => { if (event.key === 'Tab') { event.preventDefault(); dialog.current?.querySelector('button')?.focus(); } }}>
-    <div className="eyebrow">WELCOME TO TODAYTABLE</div>
-    <h2 id="review-intro-title">우연한 식탁을 둘러보세요</h2>
-    <p id="review-intro-description">이 사이트는 서비스 검토를 위한 체험 공간입니다. 참가자·식탁·문의·후기는 구성된 자료이며, 실제 모집이나 예약을 뜻하지 않습니다. 결제·환불은 가상으로 처리되며 실제 금액이 이동하지 않습니다. 이메일 발송과 외부 식당 예약은 이루어지지 않습니다.</p>
-    <p>참가자의 만남 준비부터 운영팀의 문의 응대까지, 하나의 서비스로 이어지는 흐름을 살펴보세요.</p>
-    <button className="button primary full" onClick={dismiss} autoFocus>확인하고 시작하기 →</button>
+  const path=usePathname(),dialog=useRef<HTMLDialogElement>(null),[open,setOpen]=useState(false);
+  const dismiss=()=>{try{localStorage.setItem(storageKey,'seen');sessionStorage.setItem('todaytable-review-intro-v1','seen');}catch{}setOpen(false);};
+  useEffect(()=>{
+    if(path!=='/'){setOpen(false);return;}
+    try{if(localStorage.getItem(storageKey)==='seen'||sessionStorage.getItem('todaytable-review-intro-v1')==='seen')return;}catch{}
+    setOpen(true);
+  },[path]);
+  useEffect(()=>{
+    if(!open||!dialog.current)return;
+    const element=dialog.current,previous=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    const overflow=document.body.style.overflow;document.body.style.overflow='hidden';element.showModal();
+    return()=>{element.close();document.body.style.overflow=overflow;if(previous?.isConnected)previous.focus({preventScroll:true});};
+  },[open]);
+  if(!open)return null;
+  return <dialog ref={dialog} className="first-visit-guide" aria-labelledby="first-visit-title" aria-describedby="first-visit-description" onCancel={dismiss}>
+    <div className="first-visit-top"><span>우연한 식탁 · 체험 안내</span><button type="button" className="guide-close" aria-label="안내 닫기" onClick={dismiss}>×</button></div>
+    <h2 id="first-visit-title">어떤 자리에서<br/>둘러보실래요?</h2><p id="first-visit-description">참가자의 만남 여정과 운영자의 사용 방법.<br/>로그인 없이 실제 화면으로 먼저 살펴보세요.</p>
+    <div className="first-visit-choices"><Link href="/guide?role=participant" onClick={dismiss}><span aria-hidden="true">함께하는 자리</span><strong>참가자로 둘러보기</strong><small>취향 → 신청 → 만남 → 후기</small></Link><Link href="/guide?role=operator" onClick={dismiss}><span aria-hidden="true">준비하는 자리</span><strong>운영자로 둘러보기</strong><small>신청 → 매칭 → 예약 → 예외 처리</small></Link></div>
+    <p className="first-visit-note">가상 자료를 사용하는 체험 사이트예요. 결제·환불로 실제 금액이 이동하지 않으며, 외부 예약·발송은 이루어지지 않습니다.</p>
+    <button type="button" className="guide-skip" onClick={dismiss}>안내 건너뛰고 직접 둘러보기 <span aria-hidden="true">→</span></button><p className="first-visit-reminder">나중에도 메뉴의 ‘이용 가이드’에서 다시 볼 수 있어요.</p>
   </dialog>;
 }

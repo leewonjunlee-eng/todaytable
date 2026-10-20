@@ -36,3 +36,7 @@ html{background:var(--experience-paper)}body{min-height:100dvh}.page-heading>.ey
 .chat-timeline .chat-message{border:0;background:transparent;box-shadow:none;padding:0;margin:0;border-radius:0}.chat-timeline .chat-message time{float:none;font-size:10px}.chat-timeline .chat-message-line>p{margin:0}@media(max-width:700px){.mobile-dock>a{font-size:11px!important}}
 .pass-option{position:relative;padding-left:45px!important}.pass-option input{position:absolute!important;left:16px!important;right:auto!important;top:23px!important;width:17px!important;height:17px!important;min-height:17px!important;margin:0!important;padding:0!important}.pass-option.selected{border-color:#577852!important;background:#f0f4e9!important}
 .pass-option input{grid-column:auto!important;grid-row:auto!important}
+/* Let the revenue chart scroll inside its card on narrow operator screens. */
+.analytics-chart-grid>.panel{min-width:0}
+.ops-table-grid>.panel{min-width:0}
+@media(max-width:850px){.ops-table-grid{grid-template-columns:minmax(0,1fr)}}

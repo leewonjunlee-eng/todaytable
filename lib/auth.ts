@@ -1,4 +1,5 @@
-import { cookies } from 'next/headers';
+import {loginDestination} from './login-destination';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { db } from './db';
 import { tokenHash } from './security';
@@ -25,13 +26,19 @@ export async function currentUser(): Promise<AuthUser | null> {
 
 export async function requireUser(): Promise<AuthUser> {
   const user = await currentUser();
-  if (!user) redirect('/login');
+  if (!user) {
+    const next=loginDestination((await headers()).get('x-todaytable-path'));
+    redirect(next&&next!=='/'?`/login?next=${encodeURIComponent(next)}`:'/login');
+  }
   return user;
 }
 
 export async function requireAdmin(): Promise<AuthUser> {
   const user = await currentUser();
-  if (!user || user.role !== 'ADMIN') redirect('/admin/login');
+  if (!user || user.role !== 'ADMIN') {
+    const next=loginDestination((await headers()).get('x-todaytable-path'),true);
+    redirect(next&&next!=='/admin'?`/admin/login?next=${encodeURIComponent(next)}`:'/admin/login');
+  }
   return user;
 }
 
