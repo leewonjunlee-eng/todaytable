@@ -51,6 +51,14 @@ test('availability waits for cutoff, worker confirms automatically, and explicit
   const chat=await import('../app/api/tables/[id]/messages/route');
   for(let i=1;i<=4;i++)assert.equal((await chat.GET(request(`/api/tables/${table.id}/messages`,i),{params:Promise.resolve({id:table.id})})).status,200);
   assert.equal((await chat.GET(request(`/api/tables/${table.id}/messages`,5),{params:Promise.resolve({id:table.id})})).status,404);
+  const room=(await db.query<any>('SELECT id FROM journey_rooms WHERE table_id=$1',[table.id])).rows[0].id;
+  const messageStart=Date.now()+1000;
+  for(let i=1;i<=205;i++)await db.query("INSERT INTO journey_messages(id,room_id,author_user_id,body,kind,created_at,request_key) VALUES($1,$2,$3,$4,'USER',$5,$6)",[randomUUID(),room,users[0],`최근 대화 ${i}`,new Date(messageStart+i*1000),randomUUID()]);
+  const recent=await(await chat.GET(request(`/api/tables/${table.id}/messages`,1),{params:Promise.resolve({id:table.id})})).json();
+  assert.equal(recent.messages.length,200);assert.equal(recent.messages[0].body,'최근 대화 6');assert.equal(recent.messages[199].body,'최근 대화 205');
+  const after=new Date(messageStart+203000).toISOString();
+  const incremental=await(await chat.GET(request(`/api/tables/${table.id}/messages?after=${encodeURIComponent(after)}`,1),{params:Promise.resolve({id:table.id})})).json();
+  assert.deepEqual(incremental.messages.map((m:any)=>m.body),['최근 대화 204','최근 대화 205']);
   assert.equal((await review.GET(request('/api/admin/matching-review',1))).status,403);
   const queue=await(await review.GET(request('/api/admin/matching-review',0))).json();assert.equal(queue.upcoming.length,1);assert.equal(queue.past.length,0);
 

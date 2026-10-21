@@ -19,11 +19,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const rows = await db.query(`SELECT m.id,m.author_user_id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
     FROM journey_messages m JOIN journey_rooms r ON r.id=m.room_id LEFT JOIN profiles p ON p.user_id=m.author_user_id
     WHERE r.table_id=$1 AND ($2::timestamptz IS NULL OR m.created_at>$2::timestamptz)
-    ORDER BY m.created_at,m.id LIMIT 200`, [id, after], `SELECT m.id,m.author_user_id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
+    ORDER BY m.created_at DESC,m.id DESC LIMIT 200`, [id, after], `SELECT m.id,m.author_user_id,COALESCE(p.display_name,'운영팀') author_name,m.body,m.kind,m.created_at
     FROM journey_messages m JOIN journey_rooms r ON r.id=m.room_id LEFT JOIN profiles p ON p.user_id=m.author_user_id
-    WHERE r.table_id=$1 AND ($2 IS NULL OR m.created_at>$2) ORDER BY m.created_at,m.id LIMIT 200`);
+    WHERE r.table_id=$1 AND ($2 IS NULL OR m.created_at>$2) ORDER BY m.created_at DESC,m.id DESC LIMIT 200`);
   const state=await db.query<any>('SELECT t.status,e.title,e.ends_at FROM dining_tables t JOIN events e ON e.id=t.event_id WHERE t.id=$1',[id]);
-  return NextResponse.json({currentUserId:user.id,title:state.rows[0]?.title,messages:rows.rows,can_post:state.rows[0]?.status==='CONFIRMED'&&(!state.rows[0]?.ends_at||+new Date(state.rows[0].ends_at)>Date.now())});
+  return NextResponse.json({currentUserId:user.id,title:state.rows[0]?.title,messages:rows.rows.reverse(),can_post:state.rows[0]?.status==='CONFIRMED'&&(!state.rows[0]?.ends_at||+new Date(state.rows[0].ends_at)>Date.now())});
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {

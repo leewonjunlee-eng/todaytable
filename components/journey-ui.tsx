@@ -39,23 +39,23 @@ export function useJourney(path: string | null, interval?: number) {
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const mounted = useRef(false);
+  const activePath = useRef(path);
   const inFlight = useRef<Promise<void> | null>(null);
 
   const load = useCallback((signal?: AbortSignal): Promise<void> => {
-    if (!path) return Promise.resolve();
+    if (!path || !mounted.current || activePath.current !== path) return Promise.resolve();
     if (inFlight.current) return inFlight.current;
 
     const request = (async () => {
-      if (mounted.current) { setError(''); setErrorStatus(null); }
       try {
         const next = await journeyFetch(path, { signal });
-        if (!signal?.aborted && mounted.current) setData(next);
+        if (!signal?.aborted && mounted.current && activePath.current === path) { setData(next); setError(''); setErrorStatus(null); }
       } catch (err) {
-        if (signal?.aborted || !mounted.current) return;
+        if (signal?.aborted || !mounted.current || activePath.current !== path) return;
         setError(err instanceof Error ? err.message : '불러오지 못했어요.');
         setErrorStatus(err instanceof JourneyError ? err.status : null);
       } finally {
-        if (!signal?.aborted && mounted.current) setLoading(false);
+        if (!signal?.aborted && mounted.current && activePath.current === path) setLoading(false);
       }
     })();
 
@@ -67,10 +67,14 @@ export function useJourney(path: string | null, interval?: number) {
     return request;
   }, [path]);
 
-  const refresh = useCallback(() => load(), [load]);
+  const refresh = useCallback(async () => {
+    if (inFlight.current) await inFlight.current;
+    if (mounted.current) await load();
+  }, [load]);
 
   useEffect(() => {
     mounted.current = true;
+    activePath.current = path;
     setLoading(Boolean(path));
     setData(null);
     if (!path) { setError(''); setErrorStatus(null); return () => { mounted.current = false; }; }
@@ -247,11 +251,11 @@ export function AdminNav() {
   );
 }
 
-export function AdminAction({ id, action, children, onDone, className = 'button quiet', body = {} }: { id: string; action: string; children: ReactNode; onDone?: () => Promise<void>; className?: string; body?: Record<string, unknown> }) {
+export function AdminAction({ id, action, children, onDone, className = 'button quiet', body = {}, confirmMessage }: { id: string; action: string; children: ReactNode; confirmMessage?: string; onDone?: () => Promise<void>; className?: string; body?: Record<string, unknown> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   async function go() {
-    if (busy) return;
+    if (busy || (confirmMessage && !window.confirm(confirmMessage))) return;
     setBusy(true); setError('');
     try { await journeyFetch('/api/admin/journey', { method: 'POST', body: JSON.stringify({ action, id, ...body }) }); await onDone?.(); }
     catch (err) { setError(err instanceof Error ? err.message : '요청에 실패했어요.'); }

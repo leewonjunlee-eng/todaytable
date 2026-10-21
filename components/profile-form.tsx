@@ -110,10 +110,11 @@ export function ProfileForm() {
         <label>이름 (필수)<input required maxLength={80} value={profile.name} onChange={(e) => update('name', e.target.value)} /></label>
         <label>연락처 (필수)<input required type="tel" placeholder="010-1234-5678" value={profile.phone} onChange={(e) => update('phone', e.target.value)} /></label>
         <label>출생연도 (필수)<input required type="number" min="1920" max={maxBirthYear} value={profile.birthYear} onChange={(e) => update('birthYear', e.target.value)} /></label>
-        <label>성별<select value={profile.gender} onChange={(e) => update('gender', e.target.value)}><option value="PREFER_NOT_TO_SAY">선택 안 함</option><option value="WOMAN">여성</option><option value="MAN">남성</option></select></label>
+        <label>성별<select aria-describedby="edit-gender-help" value={profile.gender} onChange={(e) => update('gender', e.target.value)}><option value="PREFER_NOT_TO_SAY">선택 안 함</option><option value="WOMAN">여성</option><option value="MAN">남성</option></select></label>
         <label>직업 (선택)<input maxLength={120} value={profile.occupation} onChange={(e) => update('occupation', e.target.value)} /></label>
         <label>MBTI (필수)<select required value={profile.mbti} onChange={e=>update('mbti',e.target.value)}><option value="">유형 선택</option>{MBTI_TYPES.map(t=><option value={t} key={t}>{t}</option>)}</select></label>
       </div>
+      <p id="edit-gender-help" className="muted">프로필은 성별 선택 없이 저장할 수 있지만, 현재 식탁의 성비 기준에 따라 모임 신청에는 여성 또는 남성 선택이 필요해요.</p>
       <fieldset>
         <legend>식사 예산 (복수 선택)</legend>
         <div className="chip-grid">

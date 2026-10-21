@@ -68,6 +68,12 @@ python3 tests/showcase-browser.py --base http://localhost:3101
 
 `tests/login-destination.test.ts`는 로그인 복귀 주소의 내부 경로·역할 제한과 외부 주소 거부를 검사합니다.
 
+`tests/profile-onboarding-browser.mjs`는 로그인에서 회원가입·프로필 저장까지 선택한 날짜·지역의 복귀 주소가 유지되는지와 성별 미선택 안내를 실제 가입 API로 확인합니다. `PROFILE_BROWSER_BASE`에 격리 로컬 서버 주소를 지정합니다.
+
+`python tests/chat-draft-browser.py --base http://127.0.0.1:3344`는 아래 fixture에서 채팅의 지연 응답 중 새 입력 보존, 전송 성공 후 초기화, 실패 후 입력·재시도 키 보존을 검사합니다. 메시지 POST는 통제 응답으로 대체합니다. `tests/reviewed-matching.test.ts`는 실제 DB에서 205개 메시지의 최신 200개 및 `after` 조회를 검사합니다.
+
+`python tests/submission-polish-browser.py --base http://127.0.0.1:3344`는 신청 단계 포커스, 안전 접수 초기화, 반복 조회 오류 배너 보존, 출석 정정 충돌 시 입력 보존, 예외 해결 확인 취소를 검사합니다. 아래 두 fixture 준비 명령을 모두 실행해야 하며, 예외 확인에는 `.data/admin-browser-session.json`의 `upcomingTable`을 사용합니다. 폼 전송은 통제 응답으로 대체합니다.
+
 브라우저 준비는 다음 순서입니다. 모든 fixture는 `.data/operator-browser.sqlite` 전용이며 운영 주소는 허용하지 않습니다. Playwright가 설치된 Python을 사용합니다.
 
 ```bash

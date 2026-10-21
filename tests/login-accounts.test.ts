@@ -31,6 +31,11 @@ test('short login accounts retain identity and permissions, rotate sessions, and
   }
   const operatorLogin=async(email:string)=>POST(new Request('http://localhost/api/auth/login',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({email,password:'simple1234',audience:'operator'})}));
   const participant=LOGIN_ACCOUNTS.find(a=>a.role==='PARTICIPANT')!;
+  const destination='/apply?day=2026-11-05&area=%ED%99%8D%EB%8C%80%2F%ED%95%A9%EC%A0%95';
+  for(const next of [destination,'https://evil.test','//evil.test','/admin']){
+   const response=await POST(new Request('http://localhost/api/auth/login',{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({email:participant.email,password:'simple1234',next})}));
+   assert.equal(response.status,200);assert.equal((await response.json()).next,next===destination?`/profile/test?next=${encodeURIComponent(destination)}`:'/profile/test');
+  }
   const operator=LOGIN_ACCOUNTS.find(a=>a.teamRole)!;
   const sessionsBefore=(await db.query('SELECT * FROM sessions')).rowCount;
   assert.equal((await operatorLogin(participant.email)).status,403);

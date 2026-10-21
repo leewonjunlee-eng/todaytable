@@ -36,7 +36,7 @@ export function LoginForm({operator=false,next}:{operator?:boolean;next?:string}
       <label>비밀번호<input name="password" type="password" autoComplete="current-password" required /></label>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="button primary full" disabled={busy}>{busy ? '확인 중…' : '로그인'} <span>→</span></button>
-      {!operator&&<p>처음 오셨나요? <Link href="/signup">회원가입하고 취향 알아보기</Link></p>}
+      {!operator&&<p>처음 오셨나요? <Link href={next?`/signup?next=${encodeURIComponent(next)}`:'/signup'}>회원가입하고 취향 알아보기</Link></p>}
     </form>
   );
 }
